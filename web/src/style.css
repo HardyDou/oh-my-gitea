@@ -103,6 +103,7 @@ button, input, select { font: inherit; }
 .pagination-bar .el-pagination { margin-left: auto; }
 .search-row { display: flex; gap: 10px; margin-bottom: 12px; }
 .issue-search { flex: 1; }
+.batch-dialog-hint { margin: 0 0 18px; color: #68748a; font-size: 13px; line-height: 1.6; }
 .filter-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
 .state-tabs { display: flex; flex: 0 0 auto; border: 1px solid #dfe4ed; border-radius: 6px; overflow: hidden; }
 .state-tab { border: 0; border-right: 1px solid #dfe4ed; background: #fff; color: #68748a; padding: 8px 15px; cursor: pointer; font-size: 13px; }
