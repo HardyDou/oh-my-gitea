@@ -27,7 +27,15 @@ export async function giteaRequest<T>(path: string, token: string, init: Request
 
 export async function getUser(token: string) { return giteaRequest<GiteaUser>('/user', token) }
 export async function getRepository(token: string, owner: string, repo: string) { return giteaRequest<GiteaRepository>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, token) }
-export async function listRepositories(token: string) { return giteaRequest<GiteaRepository[]>('/user/repos?limit=100&sort=updated', token) }
+export async function listRepositories(token: string) {
+  const all: GiteaRepository[] = []
+  for (let page = 1; page <= 1000; page += 1) {
+    const items = await giteaRequest<GiteaRepository[]>(`/user/repos?limit=100&sort=updated&page=${page}`, token)
+    all.push(...items)
+    if (items.length < 100) break
+  }
+  return all
+}
 export async function listProjects(token: string, owner: string, repo: string) { return giteaRequest<GiteaProject[]>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/projects?state=all&limit=100`, token) }
 
 export async function renderMarkdown(token: string, markdown: string) {
@@ -43,7 +51,8 @@ export async function listComments(token: string, owner: string, repo: string, n
 export async function createComment(token: string, owner: string, repo: string, number: number, body: string) { return giteaRequest<GiteaComment>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${number}/comments`, token, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }) }
 
 export async function listIssues(token: string, owner: string, repo: string, params: Record<string, string | undefined>) {
-  const search = new URLSearchParams({ state: 'all', limit: '100' })
+  // 与 Gitea 的 Issues 页面保持一致：只统计 Issue，不把 Pull Request 混入总数。
+  const search = new URLSearchParams({ state: 'all', type: 'issues', limit: '100' })
   for (const [key, value] of Object.entries(params)) if (value) search.set(key, value)
   return giteaRequest<GiteaIssue[]>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?${search}`, token)
 }

@@ -127,7 +127,17 @@ function mapIssue(issue: GiteaIssue, repository: GiteaRepository): Issue {
   }
 }
 
-async function getAllRepositoryIssues(repository: GiteaRepository) { const all: GiteaIssue[] = []; for (let page = 1; page <= 10; page += 1) { const result = await getIssues(repository, page); all.push(...result.items); if (result.items.length < 100) break } return all }
+async function getAllRepositoryIssues(repository: GiteaRepository) {
+  const all: GiteaIssue[] = []
+  const seen = new Set<number>()
+  // 不再限制 10 页，避免仓库超过 1000 条 Issue 时总数被截断；最多 1000 页仅作为异常响应保护。
+  for (let page = 1; page <= 1000; page += 1) {
+    const result = await getIssues(repository, page)
+    for (const issue of result.items) if (!seen.has(issue.number)) { seen.add(issue.number); all.push(issue) }
+    if (result.items.length < 100) break
+  }
+  return all
+}
 
 async function loadData() {
   loading.value = true
