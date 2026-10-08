@@ -32,7 +32,8 @@ export async function listRepositories(token: string) {
   for (let page = 1; page <= 1000; page += 1) {
     const items = await giteaRequest<GiteaRepository[]>(`/user/repos?limit=100&sort=updated&page=${page}`, token)
     all.push(...items)
-    if (items.length < 100) break
+    // Gitea 实例可能把 limit 截断为 50；不能用 items.length < 100 判断最后一页。
+    if (!items.length) break
   }
   return all
 }

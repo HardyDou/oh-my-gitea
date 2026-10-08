@@ -134,7 +134,8 @@ async function getAllRepositoryIssues(repository: GiteaRepository) {
   for (let page = 1; page <= 1000; page += 1) {
     const result = await getIssues(repository, page)
     for (const issue of result.items) if (!seen.has(issue.number)) { seen.add(issue.number); all.push(issue) }
-    if (result.items.length < 100) break
+    // 实际分页大小由 Gitea 实例控制，可能只有 50 条；直到空页才结束。
+    if (!result.items.length) break
   }
   return all
 }
