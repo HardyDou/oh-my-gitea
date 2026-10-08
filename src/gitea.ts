@@ -13,7 +13,7 @@ export type GiteaIssue = {
 export type GiteaProject = { id: number; title: string; description?: string; state?: string }
 export type GiteaComment = { id: number; body: string; created_at?: string; updated_at?: string; user?: { login: string; avatar_url?: string } }
 
-export async function giteaRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+export async function giteaRequestWithMeta<T>(path: string, token: string, init: RequestInit = {}) {
   const response = await fetch(`${config.giteaBaseUrl}/api/v1${path}`, {
     ...init,
     headers: { Accept: 'application/json', Authorization: `token ${token}`, ...(init.headers ?? {}) },
@@ -22,7 +22,12 @@ export async function giteaRequest<T>(path: string, token: string, init: Request
     const detail = await response.text()
     throw new Error(`Gitea API ${response.status}: ${detail.slice(0, 300)}`)
   }
-  return response.json() as Promise<T>
+  const total = Number(response.headers.get('x-total-count'))
+  return { data: await response.json() as T, total: Number.isFinite(total) && total >= 0 ? total : undefined }
+}
+
+export async function giteaRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+  return (await giteaRequestWithMeta<T>(path, token, init)).data
 }
 
 export async function getUser(token: string) { return giteaRequest<GiteaUser>('/user', token) }
@@ -55,7 +60,7 @@ export async function listIssues(token: string, owner: string, repo: string, par
   // 与 Gitea 的 Issues 页面保持一致：只统计 Issue，不把 Pull Request 混入总数。
   const search = new URLSearchParams({ state: 'all', type: 'issues', limit: '100' })
   for (const [key, value] of Object.entries(params)) if (value) search.set(key, value)
-  return giteaRequest<GiteaIssue[]>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?${search}`, token)
+  return giteaRequestWithMeta<GiteaIssue[]>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?${search}`, token)
 }
 
 export async function exchangeCode(code: string, codeVerifier?: string) {

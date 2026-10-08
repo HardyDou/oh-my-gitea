@@ -211,9 +211,9 @@ app.get<{ Params: { owner: string; repo: string }; Querystring: Record<string, s
   const context = await repositoryContext(auth.token, request.params.owner, request.params.repo)
   const queryParams = { ...request.query }
   delete queryParams.repository
-  const issues = await listIssues(auth.token, request.params.owner, request.params.repo, queryParams)
-  const management = await getManagement(context.local.id, issues.map((issue) => issue.number))
-  return { items: issues.map((issue) => ({ ...issue, management: management.get(issue.number) ?? { stage: '需求', stage_code: 'requirement', sub_stage: '未开始', sub_stage_code: 'not_started', priority: 'P2' } })) }
+  const issueResult = await listIssues(auth.token, request.params.owner, request.params.repo, queryParams)
+  const management = await getManagement(context.local.id, issueResult.data.map((issue) => issue.number))
+  return { total: issueResult.total, items: issueResult.data.map((issue) => ({ ...issue, management: management.get(issue.number) ?? { stage: '需求', stage_code: 'requirement', sub_stage: '未开始', sub_stage_code: 'not_started', priority: 'P2' } })) }
 })
 
 app.patch<{ Params: { owner: string; repo: string; number: string }; Body: { dueDate?: string | null } }>('/api/v1/repositories/:owner/:repo/issues/:number/due-date', async (request, reply) => {
@@ -316,6 +316,43 @@ app.patch<{ Params: { owner: string; repo: string; number: string }; Body: { sta
     return saved.rows[0]
   })
   return result
+})
+
+app.post<{ Body: { items?: { owner?: string; repo?: string; number?: number }[]; stageCode?: string; subStageCode?: string } }>('/api/v1/management/batch', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const body = request.body ?? {}
+  const rawItems = Array.isArray(body.items) ? body.items : []
+  if (!rawItems.length || rawItems.length > 500) return reply.code(400).send({ error: 'invalid_batch', message: '一次批量修改需要选择 1～500 个 Issue' })
+  const stageConfig = await getStageConfiguration()
+  const targetStage = stageConfig.find((stage) => stage.code === body.stageCode)
+  const targetSubStage = targetStage?.substages.find((substage) => substage.code === body.subStageCode)
+  if (!targetStage || !targetSubStage) return reply.code(400).send({ error: 'invalid_management_value', message: '阶段或状态不存在，请刷新后重试' })
+  const uniqueItems = [...new Map(rawItems.map((item) => [`${item.owner}/${item.repo}#${item.number}`, item])).values()]
+  if (uniqueItems.some((item) => !item.owner || !item.repo || !Number.isInteger(item.number) || Number(item.number) <= 0)) return reply.code(400).send({ error: 'invalid_batch', message: '批量项目参数无效' })
+  // 每个仓库只读取一次权限和本地映射，避免 100 个 Issue 触发 100 次 Gitea 仓库请求。
+  const contexts = new Map<string, Awaited<ReturnType<typeof repositoryContext>>>()
+  for (const item of uniqueItems) {
+    const key = `${item.owner}/${item.repo}`
+    if (!contexts.has(key)) contexts.set(key, await repositoryContext(auth.token, item.owner as string, item.repo as string))
+  }
+  const updated = await withTransaction(async (client) => {
+    const results: Array<Record<string, unknown>> = []
+    for (const item of uniqueItems) {
+      const owner = item.owner as string
+      const repo = item.repo as string
+      const context = contexts.get(`${owner}/${repo}`) as Awaited<ReturnType<typeof repositoryContext>>
+      const issueNumber = item.number as number
+      const previous = await client.query<{ id: number; stage: string; stage_code: string; sub_stage: string; sub_stage_code: string; priority: string }>('SELECT id, stage, stage_code, sub_stage, sub_stage_code, priority FROM issue_management WHERE repository_id = $1 AND issue_number = $2 FOR UPDATE', [context.local.id, issueNumber])
+      const defaultStage = stageConfig[0]
+      const current = previous.rows[0] ?? { id: 0, stage: defaultStage?.name ?? '需求', stage_code: defaultStage?.code ?? 'requirement', sub_stage: defaultStage?.substages[0]?.name ?? '未开始', sub_stage_code: defaultStage?.substages[0]?.code ?? 'not_started', priority: 'P2' }
+      const saved = await client.query<{ id: number; stage: string; stage_code: string; sub_stage: string; sub_stage_code: string; priority: string }>(`INSERT INTO issue_management (repository_id, issue_number, stage, stage_code, sub_stage, sub_stage_code, priority) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (repository_id, issue_number) DO UPDATE SET stage = EXCLUDED.stage, stage_code = EXCLUDED.stage_code, sub_stage = EXCLUDED.sub_stage, sub_stage_code = EXCLUDED.sub_stage_code, priority = EXCLUDED.priority, updated_at = now() RETURNING id, stage, stage_code, sub_stage, sub_stage_code, priority`, [context.local.id, issueNumber, targetStage.name, targetStage.code, targetSubStage.name, targetSubStage.code, current.priority])
+      if (targetStage.code !== current.stage_code || targetSubStage.code !== current.sub_stage_code) await client.query(`INSERT INTO issue_flow_history (issue_management_id, actor_gitea_user_id, from_stage, to_stage, from_sub_stage, to_sub_stage, from_priority, to_priority) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [saved.rows[0].id, auth.user.gitea_user_id, current.stage, targetStage.name, current.sub_stage, targetSubStage.name, current.priority, current.priority])
+      await client.query(`INSERT INTO audit_log (actor_gitea_user_id, actor_type, action, resource, payload) VALUES ($1, $2, $3, $4, $5)`, [auth.user.gitea_user_id, auth.actorType, 'batch_update_issue_management', `${context.remote.full_name}#${issueNumber}`, JSON.stringify({ from: current, to: { stage: targetStage.name, stageCode: targetStage.code, subStage: targetSubStage.name, subStageCode: targetSubStage.code } })])
+      results.push({ owner, repo, number: issueNumber, ...saved.rows[0] })
+    }
+    return results
+  })
+  return { items: updated }
 })
 
 app.post<{ Body: Record<string, unknown> }>('/webhooks/gitea', async (request, reply) => {

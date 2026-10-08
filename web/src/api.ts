@@ -61,11 +61,17 @@ export function getRepositories() {
 }
 
 export function getIssues(repository: GiteaRepository, page = 1) {
-  return request<{ items: GiteaIssue[] }>(`/api/v1/repositories/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/issues?page=${page}`)
+  return request<{ items: GiteaIssue[]; total?: number }>(`/api/v1/repositories/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/issues?page=${page}`)
 }
 
+export type ManagementResult = { stage: string; stage_code: string; sub_stage: string; sub_stage_code: string; priority: string }
+
 export function updateManagement(repository: GiteaRepository, number: number, data: { stage?: string; stageCode?: string; subStage?: string; subStageCode?: string; priority?: string }) {
-  return request<{ stage: string; stage_code: string; sub_stage: string; sub_stage_code: string; priority: string }>(`/api/v1/repositories/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/issues/${number}/management`, { method: 'PATCH', body: JSON.stringify(data) })
+  return request<ManagementResult>(`/api/v1/repositories/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/issues/${number}/management`, { method: 'PATCH', body: JSON.stringify(data) })
+}
+
+export function batchUpdateManagement(items: Array<{ repository: GiteaRepository; number: number }>, data: { stageCode: string; subStageCode: string }) {
+  return request<{ items: Array<ManagementResult & { owner: string; repo: string; number: number }> }>('/api/v1/management/batch', { method: 'POST', body: JSON.stringify({ items: items.map((item) => ({ owner: item.repository.owner, repo: item.repository.name, number: item.number })), ...data }) })
 }
 
 export function renderMarkdown(body: string) {

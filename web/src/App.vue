@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import GiteaSettings from './GiteaSettings.vue'
 import { ArrowLeft, Bell, Calendar, Connection, Grid, House, Setting, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
-import { addIssueComment, getIssueDetail, getIssues, getMe, getRepositories, getStageConfig, renderMarkdown, saveStageConfig, updateAssignee, updateIssueDueDate, updateManagement, uploadIssueAttachment, type AppUser, type GiteaComment, type GiteaIssue, type GiteaRepository, type StageConfig } from './api'
+import { addIssueComment, batchUpdateManagement, getIssueDetail, getIssues, getMe, getRepositories, getStageConfig, renderMarkdown, saveStageConfig, updateAssignee, updateIssueDueDate, updateManagement, uploadIssueAttachment, type AppUser, type GiteaComment, type GiteaIssue, type GiteaRepository, type StageConfig } from './api'
 
 type Stage = string
 type Priority = 'P0' | 'P1' | 'P2' | 'P3'
@@ -65,6 +65,7 @@ const codeEditKeys = ref<Record<string, boolean>>({})
 const draggedStageIndex = ref<number | null>(null)
 const draggedSubstage = ref<{ stageIndex: number; substageIndex: number } | null>(null)
 const issues = ref<Issue[]>([])
+const sourceIssueTotal = ref(0)
 const selectedIssues = ref<Issue[]>([])
 const batchDialogVisible = ref(false)
 const batchSaving = ref(false)
@@ -78,6 +79,8 @@ const selectedIssueSubstages = computed(() => stageConfig.value.find((stage) => 
 const batchSubstages = computed(() => stageConfig.value.find((stage) => stage.code === batchStageCode.value)?.substages ?? [])
 const checklistItems = computed(() => { const body = selectedIssue.value?.description ?? ''; return [...body.matchAll(/^- \[([ xX])\] (.+)$/gm)].map((match) => ({ done: match[1].toLowerCase() === 'x', text: match[2] })) })
 const pagedIssues = computed(() => visibleIssues.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
+const hasOnlyStateFilter = computed(() => !searchTerm.value && selectedRepo.value === '全部仓库' && selectedProject.value === '全部项目' && selectedPriority.value === '全部优先级' && selectedLabel.value === '全部标签' && selectedMilestone.value === '全部里程碑' && selectedAuthor.value === '全部作者' && selectedAssignee.value === '全部指派人' && selectedType.value === '全部类型' && updatedRange.value.length !== 2)
+const issueDisplayTotal = computed(() => hasOnlyStateFilter.value && selectedState.value === '全部' && sourceIssueTotal.value ? sourceIssueTotal.value : visibleIssues.value.length)
 function sameUser(left: string | undefined, right: string | undefined) { return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase()) }
 const myIssues = computed(() => issues.value.filter((issue) => sameUser(issue.assignee, currentUser.value?.login)).sort((a, b) => (a.state === 'open' ? 0 : 1) - (b.state === 'open' ? 0 : 1) || (a.updatedAt < b.updatedAt ? 1 : -1)).slice(0, 8))
 const upcomingIssues = computed(() => { const today = new Date().toISOString().slice(0, 10); return issues.value.filter((issue) => issue.state === 'open' && issue.dueDate && issue.dueDate >= today).sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '')).slice(0, 20) })
@@ -130,14 +133,16 @@ function mapIssue(issue: GiteaIssue, repository: GiteaRepository): Issue {
 async function getAllRepositoryIssues(repository: GiteaRepository) {
   const all: GiteaIssue[] = []
   const seen = new Set<number>()
+  let total: number | undefined
   // 不再限制 10 页，避免仓库超过 1000 条 Issue 时总数被截断；最多 1000 页仅作为异常响应保护。
   for (let page = 1; page <= 1000; page += 1) {
     const result = await getIssues(repository, page)
+    total ??= result.total
     for (const issue of result.items) if (!seen.has(issue.number)) { seen.add(issue.number); all.push(issue) }
-    // 实际分页大小由 Gitea 实例控制，可能只有 50 条；直到空页才结束。
-    if (!result.items.length) break
+    // 实际分页大小由 Gitea 实例控制，可能只有 50 条；总数达到响应头即停止。
+    if (!result.items.length || (total !== undefined && all.length >= total)) break
   }
-  return all
+  return { items: all, total: total ?? all.length }
 }
 
 async function loadData() {
@@ -152,7 +157,8 @@ async function loadData() {
     const result = await getRepositories()
     repositories.value = result.items
     const responses = await Promise.all(result.items.map((repository) => getAllRepositoryIssues(repository)))
-    issues.value = responses.flatMap((items, index) => items.map((issue) => mapIssue(issue, result.items[index])))
+    sourceIssueTotal.value = responses.reduce((sum, response) => sum + response.total, 0)
+    issues.value = responses.flatMap((response, index) => response.items.map((issue) => mapIssue(issue, result.items[index])))
     const match = window.location.pathname.match(/^\/([^/]+)\/([^/]+)\/issues\/(\d+)$/)
     if (match) {
       const target = issues.value.find((issue) => issue.repository.owner === match[1] && issue.repository.name === match[2] && issue.number === Number(match[3]))
@@ -337,30 +343,19 @@ async function saveBatchManagement() {
     await ElMessageBox.confirm(`确定将选中的 ${selectedIssues.value.length} 个 Issue 设置为「${stage.name} / ${substage.name}」吗？`, '批量修改阶段/状态', { type: 'warning', confirmButtonText: '确认修改', cancelButtonText: '取消' })
   } catch { return }
   batchSaving.value = true
-  let success = 0
-  const failures: string[] = []
   try {
-    // 分批并发，避免 100 个 Issue 逐个等待导致用户误以为操作没有生效。
-    for (let index = 0; index < selectedIssues.value.length; index += 5) {
-      const group = selectedIssues.value.slice(index, index + 5)
-      const results = await Promise.all(group.map(async (issue) => {
-        try {
-          const result = await updateManagement(issue.repository, issue.number, { stageCode: stage.code, subStageCode: substage.code })
-          updateLocalIssue(issue, result)
-          return { ok: true, number: issue.number }
-        } catch (error) {
-          return { ok: false, number: issue.number, message: (error as Error).message }
-        }
-      }))
-      for (const result of results) {
-        if (result.ok) success++
-        else failures.push(`${result.number}（${result.message}）`)
-      }
+    // 一次请求提交全部选中 Issue，由后端统一校验、复用仓库上下文并在一个事务中更新。
+    const result = await batchUpdateManagement(selectedIssues.value, { stageCode: stage.code, subStageCode: substage.code })
+    for (const updated of result.items) {
+      const issue = selectedIssues.value.find((item) => item.repository.owner === updated.owner && item.repository.name === updated.repo && item.number === updated.number)
+      if (issue) updateLocalIssue(issue, updated)
     }
+    const success = result.items.length
     selectedIssues.value = []
     batchDialogVisible.value = false
-    if (failures.length) ElMessage.warning(`已成功修改 ${success} 个，失败 ${failures.length} 个：${failures.slice(0, 8).join('、')}${failures.length > 8 ? ' 等' : ''}`)
-    else ElMessage.success(`已批量修改 ${success} 个 Issue 的阶段/状态`)
+    ElMessage.success(`已批量修改 ${success} 个 Issue 的阶段/状态`)
+  } catch (error) {
+    ElMessage.error((error as Error).message || '批量修改失败，未提交任何 Issue')
   } finally { batchSaving.value = false }
 }
 async function login() { try { await fetch('/auth/logout', { method: 'POST', credentials: 'include' }) } finally { window.location.href = '/auth/gitea' } }
@@ -479,7 +474,7 @@ onMounted(initializePage)
           </section>
           <div v-loading="loading" class="issue-content" :class="{ 'list-content': activeView === 'issues' }">
             <template v-if="activeView === 'board'"><div v-if="boardFocusStage" class="board-breadcrumb"><el-button text type="primary" @click="leaveBoardStage">← 返回阶段看板</el-button><span>/</span><strong>{{ boardFocusStage }} · 子阶段</strong></div><div class="board"><section v-for="stage in boardColumns" :key="stage" class="column" :class="{ collapsed: collapsedColumns[stage] }" @scroll="onColumnScroll(stage, $event)" @dragover.prevent @drop="dropIssue(stage)"><div class="column-head" :class="{ clickable: !boardFocusStage }" @click="enterBoardStage(stage)"><span>{{ stage }}</span><span class="column-head-actions"><span class="column-count">{{ boardTotal(stage) }}</span><button class="column-collapse" title="折叠列" @click.stop="toggleColumn(stage)">{{ collapsedColumns[stage] ? '展开' : '折叠' }}</button></span></div><article v-for="issue in boardItems(stage)" :key="`${issue.repo}-${issue.number}`" class="issue-card" draggable="true" @dragstart="startDrag(issue)" @dragend="draggedIssue = null" @click="openIssue(issue)"><div class="issue-top"><span class="issue-number">#{{ issue.number }}</span><div class="quick-management"><el-popover placement="bottom-end" :width="150" trigger="click"><template #reference><button class="quick-stage" @click.stop>{{ issue.stage }}</button></template><div class="filter-popup"><div class="popup-caption">推进阶段</div><button v-for="next in nextStages(issue.stage)" :key="next" class="popup-option" @click.stop="quickUpdate(issue, { stage: next })">{{ next }}</button><span v-if="nextStages(issue.stage).length === 0" class="popup-empty">已完成</span></div></el-popover><el-popover placement="bottom-end" :width="130" trigger="click"><template #reference><button class="quick-priority" :class="`priority-${issue.priority.toLowerCase()}`" @click.stop>{{ issue.priority }}</button></template><div class="filter-popup"><div class="popup-caption">调整优先级</div><button v-for="priority in ['P0', 'P1', 'P2', 'P3']" :key="priority" class="popup-option" :class="{ selected: issue.priority === priority }" @click.stop="quickUpdate(issue, { priority: priority as Priority })">{{ priority }}</button></div></el-popover></div></div><div class="issue-title">{{ issue.title }}</div><div class="issue-labels"><el-popover placement="bottom-start" :width="150" trigger="click"><template #reference><el-tag class="issue-substage" size="small" effect="plain" @click.stop>{{ issue.subStage }}</el-tag></template><div class="filter-popup"><div class="popup-caption">调整状态</div><button v-for="substage in stageConfig.find(item => item.name === issue.stage)?.substages ?? []" :key="substage.name" class="popup-option" @click.stop="quickUpdate(issue, { subStageCode: substage.code, subStage: substage.name })">{{ substage.name }}</button></div></el-popover><el-tag v-for="label in issue.labels" :key="label.name" size="small" :style="labelStyle(label)">{{ label.name }}</el-tag></div><div class="issue-foot"><span class="issue-type">{{ issue.repo }} · {{ issue.project }}</span><el-popover placement="bottom-end" :width="180" trigger="click"><template #reference><button class="assignee" @click.stop>{{ issue.assignee === '未分配' ? '?' : issue.assignee.slice(0, 1) }}</button></template><div class="filter-popup"><div class="popup-caption">指派给</div><button v-for="person in assignees.filter(item => item !== '全部指派人')" :key="person" class="popup-option" :class="{ selected: issue.assignee === person }" @click.stop="quickAssign(issue, person)">{{ person }}</button></div></el-popover></div></article><div v-if="boardItems(stage).length > 0 && boardItems(stage).length < boardTotal(stage)" class="load-more"><el-button size="small" text type="primary" @click.stop="loadMore(stage)">加载更多</el-button></div><div v-else-if="boardItems(stage).length > 0" class="load-end">到底了</div><el-empty v-if="boardTotal(stage) === 0" description="暂无 Issue" :image-size="45" /></section></div></template>
-            <template v-else><el-table :data="pagedIssues" stripe @selection-change="onSelectionChange" @row-click="openIssue"><el-table-column type="selection" width="48" /><el-table-column prop="number" label="编号" width="75"><template #default="scope">#{{ scope.row.number }}</template></el-table-column><el-table-column prop="title" label="标题" min-width="300" /><el-table-column label="标签" min-width="170"><template #default="scope"><div class="table-labels"><el-tag v-for="label in scope.row.labels" :key="label.name" size="small" :style="labelStyle(label)">{{ label.name }}</el-tag></div></template></el-table-column><el-table-column prop="repo" label="仓库" width="130" /><el-table-column prop="project" label="项目" width="130" /><el-table-column prop="stage" label="阶段" width="85" /><el-table-column prop="subStage" label="子阶段" width="95" /><el-table-column prop="priority" label="优先级" width="90"><template #default="scope"><el-tag :type="priorityType(scope.row.priority)" size="small">{{ scope.row.priority }}</el-tag></template></el-table-column><el-table-column prop="milestone" label="里程碑" width="120" /><el-table-column prop="author" label="作者" width="95" /><el-table-column prop="assignee" label="指派人" width="95" /><el-table-column prop="type" label="类型" width="80" /><el-table-column prop="updated" label="更新时间" width="125" /></el-table><div class="pagination-bar"><span>共 {{ visibleIssues.length }} 条 Issue<span v-if="selectedIssues.length">，已选择 {{ selectedIssues.length }} 条</span></span><el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :page-sizes="[20, 50, 100]" :total="visibleIssues.length" layout="total, sizes, prev, pager, next" background /></div></template>
+            <template v-else><el-table :data="pagedIssues" stripe @selection-change="onSelectionChange" @row-click="openIssue"><el-table-column type="selection" width="48" /><el-table-column prop="number" label="编号" width="75"><template #default="scope">#{{ scope.row.number }}</template></el-table-column><el-table-column prop="title" label="标题" min-width="300" /><el-table-column label="标签" min-width="170"><template #default="scope"><div class="table-labels"><el-tag v-for="label in scope.row.labels" :key="label.name" size="small" :style="labelStyle(label)">{{ label.name }}</el-tag></div></template></el-table-column><el-table-column prop="repo" label="仓库" width="130" /><el-table-column prop="project" label="项目" width="130" /><el-table-column prop="stage" label="阶段" width="85" /><el-table-column prop="subStage" label="子阶段" width="95" /><el-table-column prop="priority" label="优先级" width="90"><template #default="scope"><el-tag :type="priorityType(scope.row.priority)" size="small">{{ scope.row.priority }}</el-tag></template></el-table-column><el-table-column prop="milestone" label="里程碑" width="120" /><el-table-column prop="author" label="作者" width="95" /><el-table-column prop="assignee" label="指派人" width="95" /><el-table-column prop="type" label="类型" width="80" /><el-table-column prop="updated" label="更新时间" width="125" /></el-table><div class="pagination-bar"><span>共 {{ issueDisplayTotal }} 条 Issue<span v-if="selectedIssues.length">，已选择 {{ selectedIssues.length }} 条</span></span><el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :page-sizes="[20, 50, 100]" :total="visibleIssues.length" layout="total, sizes, prev, pager, next" background /></div></template>
           <el-dialog v-model="batchDialogVisible" title="批量修改阶段/状态" width="440px" destroy-on-close>
             <p class="batch-dialog-hint">将修改选中的 {{ selectedIssues.length }} 个 Issue。其他管理属性保持不变。</p>
             <el-form label-position="top">
