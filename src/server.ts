@@ -3,10 +3,12 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import { config } from './config.js'
+import { giteaConfigured, initializeGiteaSettings, publicGiteaSettings, saveGiteaSettings, validConfigToken } from './settings.js'
 import { ensureStageConfiguration, getManagement, getStageConfiguration, query, upsertRepository, upsertUser, withTransaction } from './db.js'
 import { createComment, exchangeCode, getIssue, getRepository, getUser, giteaRequest, listComments, listIssues, listProjects, listRepositories, renderMarkdown, type GiteaIssue, type GiteaProject, type GiteaRepository } from './gitea.js'
 
-const app = Fastify({ logger: true })
+const app = Fastify({ logger: { redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-system-config-token"]'] } })
+let configurationRevision = 0
 const sessions = new Map<string, { token: string; user: Awaited<ReturnType<typeof upsertUser>> }>()
 const oauthRequests = new Map<string, { verifier: string; expiresAt: number }>()
 
@@ -52,6 +54,33 @@ async function repositoryContext(token: string, owner: string, repo: string, wri
 }
 
 app.get('/health', async () => ({ ok: true, service: 'gitea-pm-backend' }))
+app.get('/api/v1/setup/status', async () => ({ configured: giteaConfigured() }))
+
+app.get('/api/v1/config/gitea', async (request, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  if (!validConfigToken(request.headers['x-system-config-token'])) return reply.code(403).send({ message: '管理密钥无效或未启用（SYSTEM_CONFIG_TOKEN 至少 32 位）' })
+  return publicGiteaSettings()
+})
+app.put('/api/v1/config/gitea', async (request, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  if (!validConfigToken(request.headers['x-system-config-token'])) return reply.code(403).send({ message: '管理密钥无效或未启用（SYSTEM_CONFIG_TOKEN 至少 32 位）' })
+  try {
+    const result = await saveGiteaSettings(request.body)
+    configurationRevision++
+    sessions.clear()
+    oauthRequests.clear()
+    return result
+  } catch (error) {
+    const messages: Record<string, string> = {
+      invalid_gitea_settings: '请输入有效的 HTTP(S) 地址、Client ID 和 Webhook 密钥',
+      unsafe_settings_key: '请先在部署环境设置至少 32 位的独立 SESSION_SECRET',
+      gitea_instance_in_use: '已有用户或仓库数据，不能直接更换 Gitea 地址；请新建独立部署，或先完成数据迁移',
+    }
+    const message = messages[(error as Error).message]
+    if (message) return reply.code(400).send({ message })
+    throw error
+  }
+})
 
 app.get('/api/v1/config/stages', async (request, reply) => {
   const auth = await authenticate(request, reply); if (!auth) return
@@ -117,6 +146,7 @@ app.put<{ Body: { items?: { id?: number; code?: string; name?: string; substages
 })
 
 app.get('/auth/gitea', async (_request, reply) => {
+  if (!giteaConfigured()) return reply.code(503).send({ message: '请先在系统配置中设置 Gitea 集成' })
   const verifier = crypto.randomBytes(32).toString('base64url')
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url')
   const state = crypto.randomBytes(24).toString('base64url')
@@ -138,11 +168,14 @@ app.get<{ Querystring: { code?: string; state?: string; error?: string } }>('/au
   const oauth = oauthRequests.get(request.query.state)
   oauthRequests.delete(request.query.state)
   if (!oauth || oauth.expiresAt < Date.now()) return reply.code(400).send({ error: 'invalid_oauth_state' })
+  const revision = configurationRevision
   const token = await exchangeCode(request.query.code, oauth.verifier)
+  if (revision !== configurationRevision) return reply.code(409).send({ message: '配置已更新，请重新登录' })
   const user = await upsertUser(await getUser(token))
+  if (revision !== configurationRevision) return reply.code(409).send({ message: '配置已更新，请重新登录' })
   const sid = crypto.randomBytes(24).toString('hex')
   sessions.set(sid, { token, user })
-  return reply.setCookie('pm_session', sid, { signed: true, httpOnly: true, sameSite: 'lax', path: '/', secure: config.nodeEnv === 'production', maxAge: 60 * 60 * 8 }).redirect(config.corsOrigin)
+  return reply.setCookie('pm_session', sid, { signed: true, httpOnly: true, sameSite: 'lax', path: '/', secure: config.sessionCookieSecure, maxAge: 60 * 60 * 8 }).redirect(config.corsOrigin)
 })
 
 app.get('/auth/me', async (request, reply) => {
@@ -283,7 +316,7 @@ app.patch<{ Params: { owner: string; repo: string; number: string }; Body: { sta
 })
 
 app.post<{ Body: Record<string, unknown> }>('/webhooks/gitea', async (request, reply) => {
-  if (config.giteaWebhookSecret && request.headers['x-gitea-token'] !== config.giteaWebhookSecret) return reply.code(401).send({ error: 'invalid_webhook_secret' })
+  if (!config.giteaWebhookSecret || request.headers['x-gitea-token'] !== config.giteaWebhookSecret) return reply.code(401).send({ error: 'invalid_webhook_secret' })
   const delivery = String(request.headers['x-gitea-delivery'] ?? crypto.randomUUID())
   const eventName = String(request.headers['x-gitea-event'] ?? 'unknown')
   await query(`INSERT INTO sync_event (delivery_id, event_name, payload) VALUES ($1, $2, $3) ON CONFLICT (delivery_id) DO NOTHING`, [delivery, eventName, JSON.stringify(request.body ?? {})])
@@ -298,4 +331,4 @@ app.setErrorHandler((error, _request, reply) => {
   return reply.code(500).send({ error: 'internal_error', message: config.nodeEnv === 'development' ? error.message : '服务器内部错误' })
 })
 
-ensureStageConfiguration().then(() => app.listen({ port: config.port, host: '0.0.0.0' })).catch((error) => { app.log.error(error); process.exit(1) })
+ensureStageConfiguration().then(initializeGiteaSettings).then(() => app.listen({ port: config.port, host: '0.0.0.0' })).catch((error) => { app.log.error(error); process.exit(1) })

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import GiteaSettings from './GiteaSettings.vue'
 import { ArrowLeft, Bell, Calendar, Connection, Grid, House, Setting, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
 import { addIssueComment, getIssueDetail, getIssues, getMe, getRepositories, getStageConfig, renderMarkdown, saveStageConfig, updateAssignee, updateIssueDueDate, updateManagement, uploadIssueAttachment, type AppUser, type GiteaComment, type GiteaIssue, type GiteaRepository, type StageConfig } from './api'
@@ -59,6 +60,7 @@ const currentUser = ref<AppUser | null>(null)
 const stageConfig = ref<StageConfig[]>(defaultStageConfig)
 const stageDraft = ref<StageConfig[]>([])
 const stageSaving = ref(false)
+const settingsSection = ref('gitea')
 const codeEditKeys = ref<Record<string, boolean>>({})
 const draggedStageIndex = ref<number | null>(null)
 const draggedSubstage = ref<{ stageIndex: number; substageIndex: number } | null>(null)
@@ -295,7 +297,21 @@ async function dropIssue(column: string) {
 function resetFilters() { searchTerm.value = ''; selectedState.value = '全部'; selectedRepo.value = '全部仓库'; selectedProject.value = '全部项目'; selectedPriority.value = '全部优先级'; selectedLabel.value = '全部标签'; selectedMilestone.value = '全部里程碑'; selectedAuthor.value = '全部作者'; selectedAssignee.value = '全部指派人'; selectedType.value = '全部类型'; updatedRange.value = []; sortBy.value = sorts[0]; currentPage.value = 1 }
 async function login() { try { await fetch('/auth/logout', { method: 'POST', credentials: 'include' }) } finally { window.location.href = '/auth/gitea' } }
 function cloneStageConfig(items: StageConfig[]) { return items.map((stage) => ({ id: stage.id, code: stage.code, name: stage.name, substages: stage.substages.map((substage) => ({ id: substage.id, code: substage.code, name: substage.name })) })) }
-function openStageSettings() { stageDraft.value = cloneStageConfig(stageConfig.value); activeView.value = 'settings' }
+function openStageSettings() { stageDraft.value = cloneStageConfig(stageConfig.value); detailMode.value = false; activeView.value = 'settings' }
+async function giteaSettingsSaved() {
+  currentUser.value = null; issues.value = []; repositories.value = []; selectedIssue.value = null; drawerVisible.value = false
+  authRequired.value = true; loadError.value = ''; readNotificationKeys.value = []
+  await loadData()
+}
+async function initializePage() {
+  try {
+    const response = await fetch('/api/v1/setup/status', { cache: 'no-store' })
+    if (response.ok && !(await response.json()).configured) {
+      openStageSettings(); authRequired.value = true; loading.value = false; return
+    }
+  } catch { /* 由 loadData 展示连接失败信息 */ }
+  await loadData()
+}
 function addStage() { stageDraft.value.push({ code: `stage_${stageDraft.value.length + 1}`, name: `阶段${stageDraft.value.length + 1}`, substages: [{ code: 'not_started', name: '未开始' }, { code: 'in_progress', name: '进行中' }, { code: 'completed', name: '完成' }] }) }
 function codeKey(id: number | undefined, index: number) { return String(id ?? `new-${index}`) }
 function toggleCodeEdit(key: string) { codeEditKeys.value[key] = !codeEditKeys.value[key] }
@@ -342,7 +358,7 @@ async function saveManagement() {
 
 watch(visibleIssues, () => { currentPage.value = 1; boardLimits.value = Object.fromEntries([...stages.value, ...stageConfig.value.flatMap((stage) => stage.substages.map((substage) => substage.name))].map((column) => [column, 20])) })
 watch(activeView, (view) => { window.localStorage.setItem('gitea-pm-view', view) })
-onMounted(loadData)
+onMounted(initializePage)
 </script>
 
 <template>
@@ -351,8 +367,8 @@ onMounted(loadData)
     <el-container class="main">
       <header class="topbar"><div class="topbar-left"><span class="page-title">{{ pageTitle }}</span><el-tag type="info" effect="plain">Gitea 数据源</el-tag></div><div class="topbar-right"><el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><button class="notification-button" title="通知"><el-icon><Bell /></el-icon><el-badge v-if="unreadNotifications.length" :value="unreadNotifications.length" :max="9" /></button></template><div class="notification-panel"><div class="notification-title">通知</div><div v-if="notifications.length === 0" class="muted">暂无新通知</div><button v-for="item in notifications" :key="item.key" class="notification-item" :class="{ unread: !readNotificationKeys.includes(item.key) }" @click="openNotification(item)"><strong>#{{ item.issue.number }} {{ item.issue.title }}</strong><span>{{ item.text }}</span></button></div></el-popover><div class="user"><el-avatar :size="30" :src="currentUser?.avatar_url ?? undefined" :icon="User" /><span>{{ currentUser?.display_name || currentUser?.login || '用户' }}</span></div></div></header>
       <main class="content">
-        <div v-if="authRequired" class="auth-state"><h2>请先登录 Gitea</h2><p>使用 Gitea OAuth 登录后才能加载仓库和 Issue。</p><el-button type="primary" @click="login">登录 Gitea</el-button></div>
-        <div v-else-if="loadError" class="auth-state"><h2>数据加载失败</h2><p>{{ loadError }}</p><el-button @click="loadData">重试</el-button></div>
+        <div v-if="authRequired && activeView !== 'settings'" class="auth-state"><h2>请先登录 Gitea</h2><p>使用 Gitea OAuth 登录后才能加载仓库和 Issue。</p><el-button type="primary" @click="login">登录 Gitea</el-button></div>
+        <div v-else-if="loadError && activeView !== 'settings'" class="auth-state"><h2>数据加载失败</h2><p>{{ loadError }}</p><el-button @click="loadData">重试</el-button></div>
         <template v-else>
           <template v-if="activeView === 'dashboard'"><section class="dashboard-page"><div class="dashboard-heading"><div><h1>工作台</h1><p>集中查看与你相关的任务、截止日期和最近动态。</p></div><el-button @click="loadData"><el-icon><Refresh /></el-icon>刷新</el-button></div><div class="dashboard-stats"><div class="dashboard-stat"><span>我的待办</span><strong>{{ myIssues.length }}</strong></div><div class="dashboard-stat"><span>即将到期</span><strong>{{ upcomingIssues.length }}</strong></div><div class="dashboard-stat"><span>最近更新</span><strong>{{ recentIssues.length }}</strong></div><div class="dashboard-stat"><span>未读通知</span><strong>{{ unreadNotifications.length }}</strong></div></div><div class="dashboard-grid"><section class="dashboard-card"><h2>我的待办</h2><p class="dashboard-card-desc">当前账户（{{ currentUser?.login || '未登录' }}）被指派的 Issue</p><button v-for="issue in myIssues" :key="issue.repo + issue.number" class="dashboard-issue" @click="openIssue(issue)"><span>#{{ issue.number }} {{ issue.title }}</span><el-tag size="small" :type="issue.state === 'open' ? 'primary' : 'info'">{{ issue.state === 'open' ? '开放' : '已关闭' }}</el-tag></button><div v-if="myIssues.length === 0" class="dashboard-empty"><strong>0</strong><span>暂无指派给你的开放 Issue</span></div></section><section class="dashboard-card"><h2>即将到期</h2><p class="dashboard-card-desc">已设置截止日期且尚未到期的开放 Issue</p><button v-for="issue in upcomingIssues" :key="issue.repo + issue.number" class="dashboard-issue" @click="openIssue(issue)"><span class="dashboard-issue-main"><strong>#{{ issue.number }}</strong><span>{{ issue.title }}</span><small>{{ issue.repo }}</small></span><span class="dashboard-issue-meta"><el-tag size="small">{{ issue.stage }}</el-tag><b>{{ issue.dueDate }}</b></span></button><div v-if="upcomingIssues.length === 0" class="dashboard-empty"><strong>0</strong><span>暂无即将到期的 Issue</span></div></section><section class="dashboard-card dashboard-wide"><h2>最近更新</h2><p class="dashboard-card-desc">最近发生变更的 Issue，点击可查看详情</p><button v-for="issue in recentIssues" :key="issue.repo + issue.number" class="dashboard-issue" @click="openIssue(issue)"><span>#{{ issue.number }} {{ issue.title }}</span><small>{{ issue.updated }}</small></button></section></div></section></template>
           <template v-else-if="detailMode && selectedIssue">
@@ -374,7 +390,10 @@ onMounted(loadData)
             </div>
           </template>
           <template v-else-if="activeView === 'settings'">
-            <section class="settings-page"><div class="settings-heading"><div><h1>阶段管理</h1><p>自定义项目阶段及每个阶段的子阶段，修改后会应用到看板和 Issue 详情。</p></div><div><el-button @click="activeView = 'board'">取消</el-button><el-button type="primary" :loading="stageSaving" @click="saveStageSettings">保存配置</el-button></div></div><div class="stage-config-list"><article v-for="(stage, stageIndex) in stageDraft" :key="stageIndex" class="stage-config-card" draggable="true" @dragstart="startStageDrag(stageIndex, $event)" @dragover.prevent @drop="dropStage(stageIndex)"><div class="stage-config-head"><el-input v-model="stage.code" :disabled="!!stage.id && !codeEditKeys[codeKey(stage.id, stageIndex)]" placeholder="阶段编码（唯一）" /><el-button v-if="stage.id" text type="primary" @click="toggleCodeEdit(codeKey(stage.id, stageIndex))">{{ codeEditKeys[codeKey(stage.id, stageIndex)] ? '锁定编码' : '修改编码' }}</el-button><el-input v-model="stage.name" placeholder="阶段名称" /><el-button text type="danger" :disabled="stageDraft.length <= 1" @click="removeStage(stageIndex)">删除阶段</el-button></div><div class="substage-title">子阶段</div><div class="substage-list"><div v-for="(substage, substageIndex) in stage.substages" :key="substageIndex" class="substage-row" draggable="true" @dragstart.stop="startSubstageDrag(stageIndex, substageIndex, $event)" @dragover.prevent @drop.stop="dropSubstage(stageIndex, substageIndex)"><el-input v-model="substage.code" :disabled="!!substage.id && !codeEditKeys[codeKey(substage.id, substageIndex)]" placeholder="子阶段编码（唯一）" /><el-button v-if="substage.id" text type="primary" @click="toggleCodeEdit(codeKey(substage.id, substageIndex))">{{ codeEditKeys[codeKey(substage.id, substageIndex)] ? '锁定编码' : '修改编码' }}</el-button><el-input v-model="substage.name" placeholder="子阶段名称" /><el-button text type="danger" :disabled="stage.substages.length <= 1" @click="removeSubstage(stage, substageIndex)">删除</el-button></div></div><el-button text type="primary" @click="addSubstage(stage)">＋添加子阶段</el-button></article></div><el-button class="add-stage-button" plain @click="addStage">＋添加阶段</el-button></section>
+            <el-radio-group v-model="settingsSection" style="margin-bottom: 20px"><el-radio-button value="gitea">Gitea 集成</el-radio-button><el-radio-button value="stages">阶段管理</el-radio-button></el-radio-group>
+            <GiteaSettings v-if="settingsSection === 'gitea'" @saved="giteaSettingsSaved" />
+            <div v-else-if="authRequired" class="auth-state"><p>阶段管理需要先登录 Gitea。</p><el-button type="primary" @click="login">登录 Gitea</el-button></div>
+            <section v-else class="settings-page"><div class="settings-heading"><div><h1>阶段管理</h1><p>自定义项目阶段及每个阶段的子阶段，修改后会应用到看板和 Issue 详情。</p></div><div><el-button @click="activeView = 'board'">取消</el-button><el-button type="primary" :loading="stageSaving" @click="saveStageSettings">保存配置</el-button></div></div><div class="stage-config-list"><article v-for="(stage, stageIndex) in stageDraft" :key="stageIndex" class="stage-config-card" draggable="true" @dragstart="startStageDrag(stageIndex, $event)" @dragover.prevent @drop="dropStage(stageIndex)"><div class="stage-config-head"><el-input v-model="stage.code" :disabled="!!stage.id && !codeEditKeys[codeKey(stage.id, stageIndex)]" placeholder="阶段编码（唯一）" /><el-button v-if="stage.id" text type="primary" @click="toggleCodeEdit(codeKey(stage.id, stageIndex))">{{ codeEditKeys[codeKey(stage.id, stageIndex)] ? '锁定编码' : '修改编码' }}</el-button><el-input v-model="stage.name" placeholder="阶段名称" /><el-button text type="danger" :disabled="stageDraft.length <= 1" @click="removeStage(stageIndex)">删除阶段</el-button></div><div class="substage-title">子阶段</div><div class="substage-list"><div v-for="(substage, substageIndex) in stage.substages" :key="substageIndex" class="substage-row" draggable="true" @dragstart.stop="startSubstageDrag(stageIndex, substageIndex, $event)" @dragover.prevent @drop.stop="dropSubstage(stageIndex, substageIndex)"><el-input v-model="substage.code" :disabled="!!substage.id && !codeEditKeys[codeKey(substage.id, substageIndex)]" placeholder="子阶段编码（唯一）" /><el-button v-if="substage.id" text type="primary" @click="toggleCodeEdit(codeKey(substage.id, substageIndex))">{{ codeEditKeys[codeKey(substage.id, substageIndex)] ? '锁定编码' : '修改编码' }}</el-button><el-input v-model="substage.name" placeholder="子阶段名称" /><el-button text type="danger" :disabled="stage.substages.length <= 1" @click="removeSubstage(stage, substageIndex)">删除</el-button></div></div><el-button text type="primary" @click="addSubstage(stage)">＋添加子阶段</el-button></article></div><el-button class="add-stage-button" plain @click="addStage">＋添加阶段</el-button></section>
           </template>
           <template v-else>
           <section class="issue-toolbar">

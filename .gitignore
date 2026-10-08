@@ -5,6 +5,9 @@ web/dist/
 .env
 .env.*
 !.env.example
+!.env.docker.example
 dist/
 .DS_Store
 *.log
+backups/
+gitea-pm-backup*.sql
