@@ -10,4 +10,5 @@ dist/
 .DS_Store
 *.log
 backups/
+.data/
 gitea-pm-backup*.sql

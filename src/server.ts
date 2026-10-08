@@ -3,7 +3,8 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import { config } from './config.js'
-import { giteaConfigured, initializeGiteaSettings, publicGiteaSettings, saveGiteaSettings, validConfigToken } from './settings.js'
+import { giteaConfigured, initializeGiteaSettings, publicGiteaSettings, saveGiteaSettings } from './settings.js'
+import { initializeAdministrator, registerAdministratorRoutes, requireAdministrator } from './admin.js'
 import { ensureStageConfiguration, getManagement, getStageConfiguration, query, upsertRepository, upsertUser, withTransaction } from './db.js'
 import { createComment, exchangeCode, getIssue, getRepository, getUser, giteaRequest, listComments, listIssues, listProjects, listRepositories, renderMarkdown, type GiteaIssue, type GiteaProject, type GiteaRepository } from './gitea.js'
 
@@ -24,6 +25,7 @@ function sessionId(request: FastifyRequest) {
 await app.register(cookie, { secret: config.sessionSecret })
 await app.register(cors, { origin: config.corsOrigin, credentials: true })
 await app.register((await import('@fastify/multipart')).default, { limits: { fileSize: 20 * 1024 * 1024 } })
+registerAdministratorRoutes(app)
 
 async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<AuthContext | null> {
   const authorization = request.headers.authorization
@@ -58,12 +60,12 @@ app.get('/api/v1/setup/status', async () => ({ configured: giteaConfigured() }))
 
 app.get('/api/v1/config/gitea', async (request, reply) => {
   reply.header('Cache-Control', 'no-store')
-  if (!validConfigToken(request.headers['x-system-config-token'])) return reply.code(403).send({ message: '管理密钥无效或未启用（SYSTEM_CONFIG_TOKEN 至少 32 位）' })
+  if (!requireAdministrator(request, reply)) return
   return publicGiteaSettings()
 })
 app.put('/api/v1/config/gitea', async (request, reply) => {
   reply.header('Cache-Control', 'no-store')
-  if (!validConfigToken(request.headers['x-system-config-token'])) return reply.code(403).send({ message: '管理密钥无效或未启用（SYSTEM_CONFIG_TOKEN 至少 32 位）' })
+  if (!requireAdministrator(request, reply)) return
   try {
     const result = await saveGiteaSettings(request.body)
     configurationRevision++
@@ -72,7 +74,7 @@ app.put('/api/v1/config/gitea', async (request, reply) => {
     return result
   } catch (error) {
     const messages: Record<string, string> = {
-      invalid_gitea_settings: '请输入有效的 HTTP(S) 地址、Client ID 和 Webhook 密钥',
+      invalid_gitea_settings: '请输入有效的 HTTP(S) 地址和 Client ID，密钥字段必须为字符串',
       unsafe_settings_key: '请先在部署环境设置至少 32 位的独立 SESSION_SECRET',
       gitea_instance_in_use: '已有用户或仓库数据，不能直接更换 Gitea 地址；请新建独立部署，或先完成数据迁移',
     }
@@ -331,4 +333,4 @@ app.setErrorHandler((error, _request, reply) => {
   return reply.code(500).send({ error: 'internal_error', message: config.nodeEnv === 'development' ? error.message : '服务器内部错误' })
 })
 
-ensureStageConfiguration().then(initializeGiteaSettings).then(() => app.listen({ port: config.port, host: '0.0.0.0' })).catch((error) => { app.log.error(error); process.exit(1) })
+ensureStageConfiguration().then(initializeGiteaSettings).then(initializeAdministrator).then(() => app.listen({ port: config.port, host: '0.0.0.0' })).catch((error) => { app.log.error(error); process.exit(1) })

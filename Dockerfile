@@ -8,10 +8,11 @@ COPY src ./src
 RUN npm run build
 
 FROM node:22-alpine AS runtime
-ENV NODE_ENV=production PORT=3000
+ENV NODE_ENV=production PORT=3000 SESSION_SECRET_FILE=/app/data/session-secret
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force \
+    && mkdir -p /app/data && chown node:node /app/data
 COPY --from=build --chown=node:node /app/dist ./dist
 USER node
 EXPOSE 3000

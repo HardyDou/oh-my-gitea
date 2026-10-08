@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { loadSessionSecret } from './secret.js'
 
 const value = (name: string, fallback?: string) => {
   const result = process.env[name] ?? fallback
@@ -15,8 +16,7 @@ export const config = {
   giteaClientSecret: process.env.GITEA_CLIENT_SECRET ?? '',
   giteaRedirectUri: process.env.GITEA_REDIRECT_URI ?? 'http://localhost:3000/auth/gitea/callback',
   giteaWebhookSecret: process.env.GITEA_WEBHOOK_SECRET ?? '',
-  sessionSecret: value('SESSION_SECRET', 'local-development-session-secret-change-me'),
-  systemConfigToken: process.env.SYSTEM_CONFIG_TOKEN ?? '',
+  sessionSecret: loadSessionSecret(process.env.SESSION_SECRET, process.env.SESSION_SECRET_FILE ?? '.data/session-secret'),
   sessionCookieSecure: process.env.SESSION_COOKIE_SECURE === undefined ? process.env.NODE_ENV === 'production' : process.env.SESSION_COOKIE_SECURE === 'true',
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
 }

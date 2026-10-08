@@ -27,13 +27,15 @@ Gitea 项目管理增强系统原型。
 
 ```bash
 cp .env.docker.example .env.docker
-# 编辑 .env.docker：分别用 openssl rand -hex 32 生成并填写
-# POSTGRES_PASSWORD、SESSION_SECRET、SYSTEM_CONFIG_TOKEN
+# 编辑 .env.docker，设置 POSTGRES_PASSWORD（数据库密码）
+# 新部署无需填写管理密钥；底层加密密钥自动生成并持久化。
 
 docker compose --env-file .env.docker -f docker-compose.deploy.yml up -d --build
 ```
 
-打开 `http://localhost:8080`，在 **系统配置 → Gitea 集成** 输入 `SYSTEM_CONFIG_TOKEN` 解锁，然后配置 Gitea 地址、OAuth Client ID / Client Secret 和 Webhook 密钥。密钥加密保存且不回显。
+打开 `http://localhost:8080`，在 **系统配置 → Gitea 集成** 首次自行设置管理员密码（至少 8 位，无公共默认密码），以后使用此密码修改配置。然后填写 Gitea 地址、OAuth Client ID / Client Secret；Webhook 密钥可选。密码只保存 scrypt 哈希，Gitea Secret 加密保存且不回显。
+
+**先在本机或可信网络完成管理员设置，再开放公网访问。**
 
 在 Gitea 中创建 OAuth2 应用，回调地址填写页面显示的 `http://localhost:8080/auth/gitea/callback`，保存配置后登录即可加载真实仓库和 Issue。
 
@@ -45,8 +47,8 @@ docker compose --env-file .env.docker -f docker-compose.deploy.yml up -d --build
 
 ```bash
 cp .env.example .env
-# 编辑 .env，设置两个不同的随机密钥 SESSION_SECRET、SYSTEM_CONFIG_TOKEN
-# 保留已有 .env 的 SESSION_SECRET，避免已有加密配置无法解密。
+# 新部署可直接使用示例，底层密钥自动生成到 .data/session-secret。
+# 升级已有部署时不要覆盖 .env，尤其需保留原 SESSION_SECRET。
 docker compose up -d
 npm ci
 npm run dev
@@ -57,11 +59,11 @@ npm ci
 npm run dev
 ```
 
-开发用 Compose 仅启动 PostgreSQL；空数据卷会自动执行 `db/*.sql`。外部数据库需按顺序手动执行 SQL，例如 `psql <连接地址> -v ON_ERROR_STOP=1 -f db/001_init.sql`（然后执行 002、003）。
+开发用 Compose 仅启动 PostgreSQL；空数据卷会自动执行 `db/*.sql`。外部数据库需按顺序手动执行 SQL，例如 `psql <连接地址> -v ON_ERROR_STOP=1 -f db/001_init.sql`（然后执行 002、003、004）。
 
 打开 `http://localhost:5173`，在系统配置页面设置 Gitea 集成。开发回调为 `http://localhost:3000/auth/gitea/callback`。
 
-`SESSION_SECRET` 同时用于配置加密，必须安全备份，不要直接更换。`SYSTEM_CONFIG_TOKEN` 是部署管理员凭据，不能提供给普通用户。
+自动生成的密钥文件必须随数据库一起备份；旧部署的 `SESSION_SECRET` 也须保留。`SYSTEM_CONFIG_TOKEN` 已停用，管理员密码直接在页面设置，与 Gitea 登录独立。
 
 ## 验证
 
@@ -72,7 +74,7 @@ npm --prefix web run build
 TEST_DATABASE_URL=postgres://pm:pm@localhost:5432/gitea_pm_test npm test
 ```
 
-未设置 `TEST_DATABASE_URL` 时数据库集成测试会跳过。当前测试覆盖 Gitea 配置鉴权、加密存储、不回显密钥、重启持久化和切换实例保护。
+未设置 `TEST_DATABASE_URL` 时数据库集成测试会跳过。当前测试覆盖管理员初始化及并发保护、密码登录、会话注销、跨站保护、限流、配置加密和持久化、切换实例保护及自动密钥生成。
 
 ## API
 
@@ -80,8 +82,12 @@ TEST_DATABASE_URL=postgres://pm:pm@localhost:5432/gitea_pm_test npm test
 
 - `GET /health`
 - `GET /api/v1/setup/status`
-- `GET /api/v1/config/gitea`（需要 `X-System-Config-Token`）
-- `PUT /api/v1/config/gitea`（需要 `X-System-Config-Token`）
+- `GET /api/v1/admin/status`
+- `POST /api/v1/admin/setup`（仅首次设置管理员密码）
+- `POST /api/v1/admin/login`
+- `POST /api/v1/admin/logout`
+- `GET /api/v1/config/gitea`（需要管理员会话 Cookie）
+- `PUT /api/v1/config/gitea`（需要管理员会话 Cookie）
 - `GET /auth/gitea`
 - `GET /auth/gitea/callback`
 - `GET /auth/me`

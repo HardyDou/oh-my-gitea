@@ -31,11 +31,6 @@ export function publicGiteaSettings() {
   const value = current()
   return { baseUrl: value.baseUrl, clientId: value.clientId, hasClientSecret: Boolean(value.clientSecret), hasWebhookSecret: Boolean(value.webhookSecret), redirectUri: config.giteaRedirectUri }
 }
-export function validConfigToken(token: unknown) {
-  if (typeof token !== 'string' || !config.systemConfigToken || config.systemConfigToken.length < 32) return false
-  const hash = (value: string) => crypto.createHash('sha256').update(value).digest()
-  return crypto.timingSafeEqual(hash(token), hash(config.systemConfigToken))
-}
 export async function initializeGiteaSettings() {
   await query(`CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, encrypted_value TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
   const result = await query<{ encrypted_value: string }>('SELECT encrypted_value FROM system_settings WHERE key = $1', ['gitea'])
@@ -67,9 +62,8 @@ export async function saveGiteaSettings(input: unknown) {
       if (used.rows.length) throw new Error('gitea_instance_in_use')
     }
     const value = { baseUrl, clientId, clientSecret: String(body.clientSecret ?? '').trim() || previous.clientSecret, webhookSecret: String(body.webhookSecret ?? '').trim() || previous.webhookSecret }
-    if (!value.webhookSecret) throw new Error('invalid_gitea_settings')
     await client.query(`INSERT INTO system_settings (key, encrypted_value) VALUES ('gitea', $1) ON CONFLICT (key) DO UPDATE SET encrypted_value = EXCLUDED.encrypted_value, updated_at = now()`, [encrypt(value)])
-    await client.query(`INSERT INTO audit_log (actor_type, action, resource, payload) VALUES ('agent', 'update_gitea_configuration', 'system/gitea', $1)`, [JSON.stringify({ credential: 'system_config_token', baseUrl, clientId })])
+    await client.query(`INSERT INTO audit_log (actor_type, action, resource, payload) VALUES ('agent', 'update_gitea_configuration', 'system/gitea', $1)`, [JSON.stringify({ credential: 'administrator_password', baseUrl, clientId })])
   })
   // 从已提交的数据重新加载；敏感配置不进入日志或 API 响应。
   await initializeGiteaSettings()

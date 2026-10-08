@@ -1,4 +1,6 @@
 .git
+.data
+backups
 .env
 .env.*
 **/node_modules

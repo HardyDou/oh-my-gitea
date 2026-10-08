@@ -27,12 +27,15 @@ services:
       NODE_ENV: production
       PORT: "3000"
       DATABASE_URL: postgres://pm:${POSTGRES_PASSWORD:?请设置数据库密码}@postgres:5432/gitea_pm
-      # Gitea 地址与 OAuth 凭据在系统配置页面设置。
-      SYSTEM_CONFIG_TOKEN: ${SYSTEM_CONFIG_TOKEN:?请设置部署管理密钥}
+      # Gitea 地址、OAuth 凭据及管理员密码在页面设置。
       GITEA_REDIRECT_URI: ${APP_URL:?请设置浏览器访问地址}/auth/gitea/callback
       CORS_ORIGIN: ${APP_URL:?请设置浏览器访问地址}
-      SESSION_SECRET: ${SESSION_SECRET:?请设置会话签名密钥}
+      # 新部署自动生成持久化密钥；升级时继续传入原 SESSION_SECRET。
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      SESSION_SECRET_FILE: /app/data/session-secret
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+    volumes:
+      - pm-backend-data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,3 +53,4 @@ services:
 
 volumes:
   pm-deploy-postgres:
+  pm-backend-data:
