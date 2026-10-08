@@ -15,21 +15,24 @@ type Issue = {
 }
 
 const defaultStageConfig: StageConfig[] = [['requirement', '需求'], ['development', '研发'], ['testing', '测试'], ['archive', '归档']].map(([code, name]) => ({ code, name, substages: [{ code: 'not_started', name: '未开始' }, { code: 'in_progress', name: '进行中' }, { code: 'completed', name: '完成' }] }))
+const savedFilters = (() => { try { return JSON.parse(typeof window !== 'undefined' ? window.localStorage.getItem('gitea-pm-filters') ?? '{}' : '{}') as Record<string, any> } catch { return {} } })()
 const types = ['全部类型', '需求', '缺陷']
 const sorts = ['更新时间（新到旧）', '更新时间（旧到新）', '编号（高到低）', '编号（低到高）']
 const states = ['全部', '开放', '已关闭']
-const selectedRepo = ref('')
-const selectedProject = ref('全部项目')
-const selectedPriority = ref('全部优先级')
-const selectedLabel = ref('全部标签')
-const selectedMilestone = ref('全部里程碑')
-const selectedAuthor = ref('全部作者')
-const selectedAssignee = ref('全部指派人')
-const selectedType = ref('全部类型')
-const updatedRange = ref<string[]>([])
-const sortBy = ref(sorts[0])
-const searchTerm = ref('')
-const selectedState = ref('全部')
+const selectedRepo = ref(savedFilters.repo ?? '')
+const selectedProject = ref(savedFilters.project ?? '全部项目')
+const selectedStage = ref(savedFilters.stage ?? '全部阶段')
+const selectedSubStage = ref(savedFilters.subStage ?? '全部状态')
+const selectedPriority = ref(savedFilters.priority ?? '全部优先级')
+const selectedLabel = ref(savedFilters.label ?? '全部标签')
+const selectedMilestone = ref(savedFilters.milestone ?? '全部里程碑')
+const selectedAuthor = ref(savedFilters.author ?? '全部作者')
+const selectedAssignee = ref(savedFilters.assignee ?? '全部指派人')
+const selectedType = ref(savedFilters.type ?? '全部类型')
+const updatedRange = ref<string[]>(Array.isArray(savedFilters.updatedRange) ? savedFilters.updatedRange : [])
+const sortBy = ref(sorts.includes(savedFilters.sortBy) ? savedFilters.sortBy : sorts[0])
+const searchTerm = ref(savedFilters.searchTerm ?? '')
+const selectedState = ref(savedFilters.state ?? '全部')
 const savedView = typeof window !== 'undefined' ? window.localStorage.getItem('gitea-pm-view') : null
 const activeView = ref<'dashboard' | 'board' | 'issues' | 'settings'>(savedView === 'issues' ? 'issues' : savedView === 'dashboard' ? 'dashboard' : 'board')
 const currentPage = ref(1)
@@ -79,7 +82,7 @@ const selectedIssueSubstages = computed(() => stageConfig.value.find((stage) => 
 const batchSubstages = computed(() => stageConfig.value.find((stage) => stage.code === batchStageCode.value)?.substages ?? [])
 const checklistItems = computed(() => { const body = selectedIssue.value?.description ?? ''; return [...body.matchAll(/^- \[([ xX])\] (.+)$/gm)].map((match) => ({ done: match[1].toLowerCase() === 'x', text: match[2] })) })
 const pagedIssues = computed(() => visibleIssues.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
-const hasOnlyStateFilter = computed(() => !searchTerm.value && Boolean(selectedRepo.value) && selectedProject.value === '全部项目' && selectedPriority.value === '全部优先级' && selectedLabel.value === '全部标签' && selectedMilestone.value === '全部里程碑' && selectedAuthor.value === '全部作者' && selectedAssignee.value === '全部指派人' && selectedType.value === '全部类型' && updatedRange.value.length !== 2)
+const hasOnlyStateFilter = computed(() => !searchTerm.value && Boolean(selectedRepo.value) && selectedProject.value === '全部项目' && selectedStage.value === '全部阶段' && selectedSubStage.value === '全部状态' && selectedPriority.value === '全部优先级' && selectedLabel.value === '全部标签' && selectedMilestone.value === '全部里程碑' && selectedAuthor.value === '全部作者' && selectedAssignee.value === '全部指派人' && selectedType.value === '全部类型' && updatedRange.value.length !== 2)
 const issueDisplayTotal = computed(() => hasOnlyStateFilter.value && selectedState.value === '全部' && sourceIssueTotals.value[selectedRepo.value] !== undefined ? sourceIssueTotals.value[selectedRepo.value] : visibleIssues.value.length)
 function sameUser(left: string | undefined, right: string | undefined) { return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase()) }
 const repositoryIssues = computed(() => issues.value.filter((issue) => !selectedRepo.value || issue.repo === selectedRepo.value))
@@ -98,6 +101,8 @@ const labels = computed(() => ['全部标签', ...Array.from(new Set(repositoryI
 const milestones = computed(() => ['全部里程碑', ...Array.from(new Set(repositoryIssues.value.map((item) => item.milestone))).filter((item) => item !== '无')])
 const authors = computed(() => ['全部作者', ...Array.from(new Set(repositoryIssues.value.map((item) => item.author))).filter(Boolean)])
 const assignees = computed(() => ['全部指派人', ...Array.from(new Set(repositoryIssues.value.map((item) => item.assignee))).filter(Boolean)])
+const stageFilters = computed(() => ['全部阶段', ...stages.value])
+const subStageFilters = computed(() => ['全部状态', ...Array.from(new Set((selectedStage.value === '全部阶段' ? stageConfig.value.flatMap((stage) => stage.substages) : stageConfig.value.find((stage) => stage.name === selectedStage.value)?.substages ?? []).map((substage) => substage.name)))])
 
 function formatDate(value?: string | null) { if (!value) return '未设置'; const date = new Date(value); if (Number.isNaN(date.getTime())) return value; return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(date).replace(/\//g, '-') }
 function formatDateOnly(value?: string | null) { if (!value) return '未设置'; return value.slice(0, 10) }
@@ -198,6 +203,8 @@ const filteredIssues = computed(() => issues.value.filter((issue) => {
   return textMatch && dateMatch
     && issue.repo === selectedRepo.value
     && (selectedProject.value === '全部项目' || issue.projects.includes(selectedProject.value))
+    && (selectedStage.value === '全部阶段' || issue.stage === selectedStage.value)
+    && (selectedSubStage.value === '全部状态' || issue.subStage === selectedSubStage.value)
     && (selectedPriority.value === '全部优先级' || issue.priority === selectedPriority.value)
     && (selectedLabel.value === '全部标签' || issue.labels.some((label) => label.name === selectedLabel.value))
     && (selectedMilestone.value === '全部里程碑' || issue.milestone === selectedMilestone.value)
@@ -342,7 +349,8 @@ async function dropIssue(column: string) {
     await quickUpdate(issue, { stage: column, stageCode: stageConfig.value.find((item) => item.name === column)?.code })
   }
 }
-function resetFilters() { searchTerm.value = ''; selectedState.value = '全部'; selectedRepo.value = repos.value[0] ?? ''; selectedProject.value = '全部项目'; selectedPriority.value = '全部优先级'; selectedLabel.value = '全部标签'; selectedMilestone.value = '全部里程碑'; selectedAuthor.value = '全部作者'; selectedAssignee.value = '全部指派人'; selectedType.value = '全部类型'; updatedRange.value = []; sortBy.value = sorts[0]; currentPage.value = 1 }
+function setStageFilter(stage: string) { selectedStage.value = stage; selectedSubStage.value = '全部状态' }
+function resetFilters() { searchTerm.value = ''; selectedState.value = '全部'; selectedRepo.value = repos.value[0] ?? ''; selectedProject.value = '全部项目'; selectedStage.value = '全部阶段'; selectedSubStage.value = '全部状态'; selectedPriority.value = '全部优先级'; selectedLabel.value = '全部标签'; selectedMilestone.value = '全部里程碑'; selectedAuthor.value = '全部作者'; selectedAssignee.value = '全部指派人'; selectedType.value = '全部类型'; updatedRange.value = []; sortBy.value = sorts[0]; currentPage.value = 1 }
 function setBatchStage(code: string) { batchStageCode.value = code; batchSubStageCode.value = stageConfig.value.find((stage) => stage.code === code)?.substages[0]?.code ?? '' }
 function openBatchDialog() {
   if (!selectedIssues.value.length) return
@@ -439,6 +447,9 @@ async function saveManagement() {
 }
 
 watch(selectedRepo, (value, oldValue) => { selectedIssues.value = []; currentPage.value = 1; if (value && value !== oldValue && repositories.value.length && !loading.value) void loadSelectedRepository() })
+watch([selectedRepo, selectedProject, selectedStage, selectedSubStage, selectedPriority, selectedLabel, selectedMilestone, selectedAuthor, selectedAssignee, selectedType, updatedRange, sortBy, searchTerm, selectedState], () => {
+  window.localStorage.setItem('gitea-pm-filters', JSON.stringify({ repo: selectedRepo.value, project: selectedProject.value, stage: selectedStage.value, subStage: selectedSubStage.value, priority: selectedPriority.value, label: selectedLabel.value, milestone: selectedMilestone.value, author: selectedAuthor.value, assignee: selectedAssignee.value, type: selectedType.value, updatedRange: updatedRange.value, sortBy: sortBy.value, searchTerm: searchTerm.value, state: selectedState.value }))
+}, { deep: true })
 watch(visibleIssues, () => { currentPage.value = 1; boardLimits.value = Object.fromEntries([...stages.value, ...stageConfig.value.flatMap((stage) => stage.substages.map((substage) => substage.name))].map((column) => [column, 20])) })
 watch(activeView, (view) => { window.localStorage.setItem('gitea-pm-view', view) })
 onMounted(initializePage)
@@ -485,6 +496,8 @@ onMounted(initializePage)
               <el-popover placement="bottom-start" :width="300" trigger="click"><template #reference><button class="filter-button">标签筛选 <span>⌄</span></button></template><div class="filter-popup"><el-input placeholder="搜索标签" size="small" /><button v-for="item in labels" :key="item" class="popup-option" :class="{ selected: selectedLabel === item }" @click="selectedLabel = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="260" trigger="click"><template #reference><button class="filter-button">里程碑筛选 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in milestones" :key="item" class="popup-option" :class="{ selected: selectedMilestone === item }" @click="selectedMilestone = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="250" trigger="click"><template #reference><button class="filter-button">项目 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in projects" :key="item" class="popup-option" :class="{ selected: selectedProject === item }" @click="selectedProject = item">{{ item }}</button></div></el-popover>
+              <el-popover placement="bottom-start" :width="180" trigger="click"><template #reference><button class="filter-button">阶段筛选 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in stageFilters" :key="item" class="popup-option" :class="{ selected: selectedStage === item }" @click="setStageFilter(item)">{{ item }}</button></div></el-popover>
+              <el-popover placement="bottom-start" :width="180" trigger="click"><template #reference><button class="filter-button">状态筛选 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in subStageFilters" :key="item" class="popup-option" :class="{ selected: selectedSubStage === item }" @click="selectedSubStage = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="220" trigger="click"><template #reference><button class="filter-button">作者 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in authors" :key="item" class="popup-option" :class="{ selected: selectedAuthor === item }" @click="selectedAuthor = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="220" trigger="click"><template #reference><button class="filter-button">指派人筛选 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in assignees" :key="item" class="popup-option" :class="{ selected: selectedAssignee === item }" @click="selectedAssignee = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="180" trigger="click"><template #reference><button class="filter-button">类型筛选 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in types" :key="item" class="popup-option" :class="{ selected: selectedType === item }" @click="selectedType = item">{{ item }}</button></div></el-popover>
@@ -494,7 +507,7 @@ onMounted(initializePage)
           </section>
           <div v-loading="loading" class="issue-content" :class="{ 'list-content': activeView === 'issues' }">
             <template v-if="activeView === 'board'"><div v-if="boardFocusStage" class="board-breadcrumb"><el-button text type="primary" @click="leaveBoardStage">← 返回阶段看板</el-button><span>/</span><strong>{{ boardFocusStage }} · 子阶段</strong></div><div class="board"><section v-for="stage in boardColumns" :key="stage" class="column" :class="{ collapsed: collapsedColumns[stage] }" @scroll="onColumnScroll(stage, $event)" @dragover.prevent @drop="dropIssue(stage)"><div class="column-head" :class="{ clickable: !boardFocusStage }" @click="enterBoardStage(stage)"><span>{{ stage }}</span><span class="column-head-actions"><span class="column-count">{{ boardTotal(stage) }}</span><button class="column-collapse" title="折叠列" @click.stop="toggleColumn(stage)">{{ collapsedColumns[stage] ? '展开' : '折叠' }}</button></span></div><article v-for="issue in boardItems(stage)" :key="`${issue.repo}-${issue.number}`" class="issue-card" draggable="true" @dragstart="startDrag(issue)" @dragend="draggedIssue = null" @click="openIssue(issue)"><div class="issue-top"><span class="issue-number">#{{ issue.number }}</span><div class="quick-management"><el-popover placement="bottom-end" :width="150" trigger="click"><template #reference><button class="quick-stage" @click.stop>{{ issue.stage }}</button></template><div class="filter-popup"><div class="popup-caption">推进阶段</div><button v-for="next in nextStages(issue.stage)" :key="next" class="popup-option" @click.stop="quickUpdate(issue, { stage: next })">{{ next }}</button><span v-if="nextStages(issue.stage).length === 0" class="popup-empty">已完成</span></div></el-popover><el-popover placement="bottom-end" :width="130" trigger="click"><template #reference><button class="quick-priority" :class="`priority-${issue.priority.toLowerCase()}`" @click.stop>{{ issue.priority }}</button></template><div class="filter-popup"><div class="popup-caption">调整优先级</div><button v-for="priority in ['P0', 'P1', 'P2', 'P3']" :key="priority" class="popup-option" :class="{ selected: issue.priority === priority }" @click.stop="quickUpdate(issue, { priority: priority as Priority })">{{ priority }}</button></div></el-popover></div></div><div class="issue-title">{{ issue.title }}</div><div class="issue-labels"><el-popover placement="bottom-start" :width="150" trigger="click"><template #reference><el-tag class="issue-substage" size="small" effect="plain" @click.stop>{{ issue.subStage }}</el-tag></template><div class="filter-popup"><div class="popup-caption">调整状态</div><button v-for="substage in stageConfig.find(item => item.name === issue.stage)?.substages ?? []" :key="substage.name" class="popup-option" @click.stop="quickUpdate(issue, { subStageCode: substage.code, subStage: substage.name })">{{ substage.name }}</button></div></el-popover><el-tag v-for="label in issue.labels" :key="label.name" size="small" :style="labelStyle(label)">{{ label.name }}</el-tag></div><div class="issue-foot"><span class="issue-type">{{ issue.repo }} · {{ issue.project }}</span><el-popover placement="bottom-end" :width="180" trigger="click"><template #reference><button class="assignee" @click.stop>{{ issue.assignee === '未分配' ? '?' : issue.assignee.slice(0, 1) }}</button></template><div class="filter-popup"><div class="popup-caption">指派给</div><button v-for="person in assignees.filter(item => item !== '全部指派人')" :key="person" class="popup-option" :class="{ selected: issue.assignee === person }" @click.stop="quickAssign(issue, person)">{{ person }}</button></div></el-popover></div></article><div v-if="boardItems(stage).length > 0 && boardItems(stage).length < boardTotal(stage)" class="load-more"><el-button size="small" text type="primary" @click.stop="loadMore(stage)">加载更多</el-button></div><div v-else-if="boardItems(stage).length > 0" class="load-end">到底了</div><el-empty v-if="boardTotal(stage) === 0" description="暂无 Issue" :image-size="45" /></section></div></template>
-            <template v-else><el-table :data="pagedIssues" stripe @selection-change="onSelectionChange" @row-click="openIssue"><el-table-column type="selection" width="48" /><el-table-column prop="number" label="编号" width="75"><template #default="scope">#{{ scope.row.number }}</template></el-table-column><el-table-column prop="title" label="标题" min-width="300" /><el-table-column label="标签" min-width="170"><template #default="scope"><div class="table-labels"><el-tag v-for="label in scope.row.labels" :key="label.name" size="small" :style="labelStyle(label)">{{ label.name }}</el-tag></div></template></el-table-column><el-table-column prop="repo" label="仓库" width="130" /><el-table-column prop="project" label="项目" width="130" /><el-table-column prop="stage" label="阶段" width="85" /><el-table-column prop="subStage" label="子阶段" width="95" /><el-table-column prop="priority" label="优先级" width="90"><template #default="scope"><el-tag :type="priorityType(scope.row.priority)" size="small">{{ scope.row.priority }}</el-tag></template></el-table-column><el-table-column prop="milestone" label="里程碑" width="120" /><el-table-column prop="author" label="作者" width="95" /><el-table-column prop="assignee" label="指派人" width="95" /><el-table-column prop="type" label="类型" width="80" /><el-table-column prop="updated" label="更新时间" width="125" /></el-table><div class="pagination-bar"><span>共 {{ issueDisplayTotal }} 条 Issue<span v-if="selectedIssues.length">，已选择 {{ selectedIssues.length }} 条</span></span><el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :page-sizes="[20, 50, 100]" :total="visibleIssues.length" layout="total, sizes, prev, pager, next" background /></div></template>
+            <template v-else><el-table :data="pagedIssues" stripe @selection-change="onSelectionChange"><el-table-column type="selection" width="48" /><el-table-column prop="number" label="编号" width="75"><template #default="scope">#{{ scope.row.number }}</template></el-table-column><el-table-column prop="title" label="标题" min-width="300"><template #default="scope"><button class="issue-title-link" type="button" @click.stop="openIssue(scope.row)">{{ scope.row.title }}</button></template></el-table-column><el-table-column label="标签" min-width="170"><template #default="scope"><div class="table-labels"><el-tag v-for="label in scope.row.labels" :key="label.name" size="small" :style="labelStyle(label)">{{ label.name }}</el-tag></div></template></el-table-column><el-table-column prop="repo" label="仓库" width="130" /><el-table-column prop="project" label="项目" width="130" /><el-table-column prop="stage" label="阶段" width="85" /><el-table-column prop="subStage" label="子阶段" width="95" /><el-table-column prop="priority" label="优先级" width="90"><template #default="scope"><el-tag :type="priorityType(scope.row.priority)" size="small">{{ scope.row.priority }}</el-tag></template></el-table-column><el-table-column prop="milestone" label="里程碑" width="120" /><el-table-column prop="author" label="作者" width="95" /><el-table-column prop="assignee" label="指派人" width="95" /><el-table-column prop="type" label="类型" width="80" /><el-table-column prop="updated" label="更新时间" width="125" /></el-table><div class="pagination-bar"><span>共 {{ issueDisplayTotal }} 条 Issue<span v-if="selectedIssues.length">，已选择 {{ selectedIssues.length }} 条</span></span><el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :page-sizes="[20, 50, 100]" :total="visibleIssues.length" layout="total, sizes, prev, pager, next" background /></div></template>
           <el-dialog v-model="batchDialogVisible" title="批量修改阶段/状态" width="440px" destroy-on-close>
             <p class="batch-dialog-hint">将修改选中的 {{ selectedIssues.length }} 个 Issue。其他管理属性保持不变。</p>
             <el-form label-position="top">

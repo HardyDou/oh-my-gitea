@@ -103,6 +103,8 @@ button, input, select { font: inherit; }
 .pagination-bar .el-pagination { margin-left: auto; }
 .search-row { display: flex; gap: 10px; margin-bottom: 12px; }
 .issue-search { flex: 1; }
+.issue-title-link { padding: 0; border: 0; background: transparent; color: #2f65cc; text-align: left; cursor: pointer; font: inherit; line-height: 1.5; }
+.issue-title-link:hover { text-decoration: underline; }
 .batch-dialog-hint { margin: 0 0 18px; color: #68748a; font-size: 13px; line-height: 1.6; }
 .filter-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
 .state-tabs { display: flex; flex: 0 0 auto; border: 1px solid #dfe4ed; border-radius: 6px; overflow: hidden; }
