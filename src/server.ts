@@ -295,7 +295,8 @@ app.patch<{ Params: { owner: string; repo: string; number: string }; Body: { sta
   const targetStageConfig = body.stageCode ? stageConfig.find((stage) => stage.code === body.stageCode) : stageConfig.find((stage) => stage.name === body.stage)
   if ((body.stage || body.stageCode) && !targetStageConfig || (body.priority && !priorities.includes(body.priority))) return reply.code(400).send({ error: 'invalid_management_value' })
   if ((body.subStage || body.subStageCode) && targetStageConfig && !targetStageConfig.substages.some((substage) => substage.name === body.subStage || substage.code === body.subStageCode)) return reply.code(400).send({ error: 'invalid_sub_stage' })
-  const context = await repositoryContext(auth.token, request.params.owner, request.params.repo, true)
+  // 阶段、子阶段和优先级保存在本系统数据库，不修改 Gitea 原始数据；读取权限即可操作。
+  const context = await repositoryContext(auth.token, request.params.owner, request.params.repo)
   const issueNumber = Number(request.params.number)
   const result = await withTransaction(async (client) => {
     const previous = await client.query<{ id: number; stage: string; stage_code: string; sub_stage: string; sub_stage_code: string; priority: string }>('SELECT id, stage, stage_code, sub_stage, sub_stage_code, priority FROM issue_management WHERE repository_id = $1 AND issue_number = $2 FOR UPDATE', [context.local.id, issueNumber])

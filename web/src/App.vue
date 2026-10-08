@@ -340,16 +340,26 @@ async function saveBatchManagement() {
   let success = 0
   const failures: string[] = []
   try {
-    for (const issue of selectedIssues.value) {
-      try {
-        const result = await updateManagement(issue.repository, issue.number, { stageCode: stage.code, subStageCode: substage.code })
-        updateLocalIssue(issue, result)
-        success++
-      } catch { failures.push(`#${issue.number}`) }
+    // 分批并发，避免 100 个 Issue 逐个等待导致用户误以为操作没有生效。
+    for (let index = 0; index < selectedIssues.value.length; index += 5) {
+      const group = selectedIssues.value.slice(index, index + 5)
+      const results = await Promise.all(group.map(async (issue) => {
+        try {
+          const result = await updateManagement(issue.repository, issue.number, { stageCode: stage.code, subStageCode: substage.code })
+          updateLocalIssue(issue, result)
+          return { ok: true, number: issue.number }
+        } catch (error) {
+          return { ok: false, number: issue.number, message: (error as Error).message }
+        }
+      }))
+      for (const result of results) {
+        if (result.ok) success++
+        else failures.push(`${result.number}（${result.message}）`)
+      }
     }
     selectedIssues.value = []
     batchDialogVisible.value = false
-    if (failures.length) ElMessage.warning(`已成功修改 ${success} 个，失败 ${failures.length} 个：${failures.join('、')}`)
+    if (failures.length) ElMessage.warning(`已成功修改 ${success} 个，失败 ${failures.length} 个：${failures.slice(0, 8).join('、')}${failures.length > 8 ? ' 等' : ''}`)
     else ElMessage.success(`已批量修改 ${success} 个 Issue 的阶段/状态`)
   } finally { batchSaving.value = false }
 }
