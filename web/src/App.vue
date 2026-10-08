@@ -150,21 +150,27 @@ async function loadData() {
   }
 }
 
+const filteredIssues = computed(() => issues.value.filter((issue) => {
+  const textMatch = !searchTerm.value || `${issue.number} ${issue.title} ${issue.labels.map((label) => label.name).join(' ')}`.toLowerCase().includes(searchTerm.value.toLowerCase())
+  const dateMatch = updatedRange.value.length !== 2 || (issue.updatedAt >= updatedRange.value[0] && issue.updatedAt <= updatedRange.value[1])
+  return textMatch && dateMatch
+    && (selectedRepo.value === '全部仓库' || issue.repo === selectedRepo.value)
+    && (selectedProject.value === '全部项目' || issue.projects.includes(selectedProject.value))
+    && (selectedPriority.value === '全部优先级' || issue.priority === selectedPriority.value)
+    && (selectedLabel.value === '全部标签' || issue.labels.some((label) => label.name === selectedLabel.value))
+    && (selectedMilestone.value === '全部里程碑' || issue.milestone === selectedMilestone.value)
+    && (selectedAuthor.value === '全部作者' || issue.author === selectedAuthor.value)
+    && (selectedAssignee.value === '全部指派人' || issue.assignee === selectedAssignee.value)
+    && (selectedType.value === '全部类型' || issue.type === selectedType.value)
+}))
+const stateCounts = computed(() => ({
+  全部: filteredIssues.value.length,
+  开放: filteredIssues.value.filter((issue) => issue.state === 'open').length,
+  已关闭: filteredIssues.value.filter((issue) => issue.state === 'closed').length,
+}))
+function stateCount(state: string) { return stateCounts.value[state as keyof typeof stateCounts.value] }
 const visibleIssues = computed(() => {
-  const filtered = issues.value.filter((issue) => {
-    const textMatch = !searchTerm.value || `${issue.number} ${issue.title} ${issue.labels.map((label) => label.name).join(' ')}`.toLowerCase().includes(searchTerm.value.toLowerCase())
-    const dateMatch = updatedRange.value.length !== 2 || (issue.updatedAt >= updatedRange.value[0] && issue.updatedAt <= updatedRange.value[1])
-    const stateMatch = selectedState.value === '全部' || (selectedState.value === '开放' && issue.state === 'open') || (selectedState.value === '已关闭' && issue.state === 'closed')
-    return textMatch && dateMatch && stateMatch
-      && (selectedRepo.value === '全部仓库' || issue.repo === selectedRepo.value)
-      && (selectedProject.value === '全部项目' || issue.projects.includes(selectedProject.value))
-      && (selectedPriority.value === '全部优先级' || issue.priority === selectedPriority.value)
-      && (selectedLabel.value === '全部标签' || issue.labels.some((label) => label.name === selectedLabel.value))
-      && (selectedMilestone.value === '全部里程碑' || issue.milestone === selectedMilestone.value)
-      && (selectedAuthor.value === '全部作者' || issue.author === selectedAuthor.value)
-      && (selectedAssignee.value === '全部指派人' || issue.assignee === selectedAssignee.value)
-      && (selectedType.value === '全部类型' || issue.type === selectedType.value)
-  })
+  const filtered = filteredIssues.value.filter((issue) => selectedState.value === '全部' || (selectedState.value === '开放' && issue.state === 'open') || (selectedState.value === '已关闭' && issue.state === 'closed'))
   return [...filtered].sort((a, b) => sortBy.value === sorts[0] ? b.updatedAt.localeCompare(a.updatedAt) : sortBy.value === sorts[1] ? a.updatedAt.localeCompare(b.updatedAt) : sortBy.value === sorts[2] ? b.number - a.number : a.number - b.number)
 })
 
@@ -398,7 +404,7 @@ onMounted(initializePage)
           <template v-else>
           <section class="issue-toolbar">
             <div class="search-row"><el-input v-model="searchTerm" class="issue-search" placeholder="搜索 Issue 标题、编号或标签" clearable><template #suffix><el-icon><Search /></el-icon></template></el-input><el-button type="primary"><el-icon><Plus /></el-icon>创建 Issue</el-button></div>
-            <div class="filter-row"><div class="state-tabs"><button v-for="state in states" :key="state" class="state-tab" :class="{ active: selectedState === state }" @click="selectedState = state">{{ state }}<span v-if="state === '开放'"> {{ visibleIssues.length }}</span></button></div><div class="quick-filters">
+            <div class="filter-row"><div class="state-tabs"><button v-for="state in states" :key="state" class="state-tab" :class="{ active: selectedState === state }" @click="selectedState = state">{{ state }} <span>{{ stateCount(state) }}</span></button></div><div class="quick-filters">
               <el-popover placement="bottom-start" :width="300" trigger="click"><template #reference><button class="filter-button">标签筛选 <span>⌄</span></button></template><div class="filter-popup"><el-input placeholder="搜索标签" size="small" /><button v-for="item in labels" :key="item" class="popup-option" :class="{ selected: selectedLabel === item }" @click="selectedLabel = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="260" trigger="click"><template #reference><button class="filter-button">里程碑筛选 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in milestones" :key="item" class="popup-option" :class="{ selected: selectedMilestone === item }" @click="selectedMilestone = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="250" trigger="click"><template #reference><button class="filter-button">项目 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in projects" :key="item" class="popup-option" :class="{ selected: selectedProject === item }" @click="selectedProject = item">{{ item }}</button></div></el-popover>
