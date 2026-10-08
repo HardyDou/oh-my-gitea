@@ -2,6 +2,10 @@
 
 Gitea 项目管理增强系统原型。
 
+## 开源许可
+
+本项目采用 [MIT License](LICENSE)，允许商业使用、修改和分发，须保留版权及许可声明。
+
 ## 技术栈
 
 - 前端：Vue 3 + TypeScript + Element Plus + Vite
