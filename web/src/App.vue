@@ -18,7 +18,7 @@ const defaultStageConfig: StageConfig[] = [['requirement', '需求'], ['developm
 const types = ['全部类型', '需求', '缺陷']
 const sorts = ['更新时间（新到旧）', '更新时间（旧到新）', '编号（高到低）', '编号（低到高）']
 const states = ['全部', '开放', '已关闭']
-const selectedRepo = ref('全部仓库')
+const selectedRepo = ref('')
 const selectedProject = ref('全部项目')
 const selectedPriority = ref('全部优先级')
 const selectedLabel = ref('全部标签')
@@ -65,7 +65,7 @@ const codeEditKeys = ref<Record<string, boolean>>({})
 const draggedStageIndex = ref<number | null>(null)
 const draggedSubstage = ref<{ stageIndex: number; substageIndex: number } | null>(null)
 const issues = ref<Issue[]>([])
-const sourceIssueTotal = ref(0)
+const sourceIssueTotals = ref<Record<string, number>>({})
 const selectedIssues = ref<Issue[]>([])
 const batchDialogVisible = ref(false)
 const batchSaving = ref(false)
@@ -79,24 +79,25 @@ const selectedIssueSubstages = computed(() => stageConfig.value.find((stage) => 
 const batchSubstages = computed(() => stageConfig.value.find((stage) => stage.code === batchStageCode.value)?.substages ?? [])
 const checklistItems = computed(() => { const body = selectedIssue.value?.description ?? ''; return [...body.matchAll(/^- \[([ xX])\] (.+)$/gm)].map((match) => ({ done: match[1].toLowerCase() === 'x', text: match[2] })) })
 const pagedIssues = computed(() => visibleIssues.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
-const hasOnlyStateFilter = computed(() => !searchTerm.value && selectedRepo.value === '全部仓库' && selectedProject.value === '全部项目' && selectedPriority.value === '全部优先级' && selectedLabel.value === '全部标签' && selectedMilestone.value === '全部里程碑' && selectedAuthor.value === '全部作者' && selectedAssignee.value === '全部指派人' && selectedType.value === '全部类型' && updatedRange.value.length !== 2)
-const issueDisplayTotal = computed(() => hasOnlyStateFilter.value && selectedState.value === '全部' && sourceIssueTotal.value ? sourceIssueTotal.value : visibleIssues.value.length)
+const hasOnlyStateFilter = computed(() => !searchTerm.value && Boolean(selectedRepo.value) && selectedProject.value === '全部项目' && selectedPriority.value === '全部优先级' && selectedLabel.value === '全部标签' && selectedMilestone.value === '全部里程碑' && selectedAuthor.value === '全部作者' && selectedAssignee.value === '全部指派人' && selectedType.value === '全部类型' && updatedRange.value.length !== 2)
+const issueDisplayTotal = computed(() => hasOnlyStateFilter.value && selectedState.value === '全部' && sourceIssueTotals.value[selectedRepo.value] !== undefined ? sourceIssueTotals.value[selectedRepo.value] : visibleIssues.value.length)
 function sameUser(left: string | undefined, right: string | undefined) { return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase()) }
-const myIssues = computed(() => issues.value.filter((issue) => sameUser(issue.assignee, currentUser.value?.login)).sort((a, b) => (a.state === 'open' ? 0 : 1) - (b.state === 'open' ? 0 : 1) || (a.updatedAt < b.updatedAt ? 1 : -1)).slice(0, 8))
-const upcomingIssues = computed(() => { const today = new Date().toISOString().slice(0, 10); return issues.value.filter((issue) => issue.state === 'open' && issue.dueDate && issue.dueDate >= today).sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '')).slice(0, 20) })
-const recentIssues = computed(() => [...issues.value].sort((a, b) => a.updatedAt < b.updatedAt ? 1 : -1).slice(0, 8))
+const repositoryIssues = computed(() => issues.value.filter((issue) => !selectedRepo.value || issue.repo === selectedRepo.value))
+const myIssues = computed(() => repositoryIssues.value.filter((issue) => sameUser(issue.assignee, currentUser.value?.login)).sort((a, b) => (a.state === 'open' ? 0 : 1) - (b.state === 'open' ? 0 : 1) || (a.updatedAt < b.updatedAt ? 1 : -1)).slice(0, 8))
+const upcomingIssues = computed(() => { const today = new Date().toISOString().slice(0, 10); return repositoryIssues.value.filter((issue) => issue.state === 'open' && issue.dueDate && issue.dueDate >= today).sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '')).slice(0, 20) })
+const recentIssues = computed(() => [...repositoryIssues.value].sort((a, b) => a.updatedAt < b.updatedAt ? 1 : -1).slice(0, 8))
 const readNotificationKeys = ref<string[]>(JSON.parse(typeof window !== 'undefined' ? window.localStorage.getItem('gitea-pm-read-notifications') ?? '[]' : '[]'))
 const notifications = computed(() => {
   const login = currentUser.value?.login
-  return issues.value.filter((issue) => issue.state === 'open' && ((sameUser(issue.assignee, login) || (login && `${issue.title} ${issue.description}`.toLowerCase().includes(`@${login.toLowerCase()}`))))).slice(0, 8).map((issue) => ({ key: `${issue.repo}#${issue.number}`, issue, text: sameUser(issue.assignee, login) ? '你被指派了该 Issue' : 'Issue 中提到了你' }))
+  return repositoryIssues.value.filter((issue) => issue.state === 'open' && ((sameUser(issue.assignee, login) || (login && `${issue.title} ${issue.description}`.toLowerCase().includes(`@${login.toLowerCase()}`))))).slice(0, 8).map((issue) => ({ key: `${issue.repo}#${issue.number}`, issue, text: sameUser(issue.assignee, login) ? '你被指派了该 Issue' : 'Issue 中提到了你' }))
 })
 const unreadNotifications = computed(() => notifications.value.filter((item) => !readNotificationKeys.value.includes(item.key)))
-const repos = computed(() => ['全部仓库', ...repositories.value.map((item) => item.full_name)])
-const projects = computed(() => ['全部项目', ...Array.from(new Set(issues.value.flatMap((item) => item.projects))).filter(Boolean)])
-const labels = computed(() => ['全部标签', ...Array.from(new Set(issues.value.flatMap((item) => item.labels.map((label) => label.name)))).filter(Boolean)])
-const milestones = computed(() => ['全部里程碑', ...Array.from(new Set(issues.value.map((item) => item.milestone))).filter((item) => item !== '无')])
-const authors = computed(() => ['全部作者', ...Array.from(new Set(issues.value.map((item) => item.author))).filter(Boolean)])
-const assignees = computed(() => ['全部指派人', ...Array.from(new Set(issues.value.map((item) => item.assignee))).filter(Boolean)])
+const repos = computed(() => repositories.value.map((item) => item.full_name))
+const projects = computed(() => ['全部项目', ...Array.from(new Set(repositoryIssues.value.flatMap((item) => item.projects))).filter(Boolean)])
+const labels = computed(() => ['全部标签', ...Array.from(new Set(repositoryIssues.value.flatMap((item) => item.labels.map((label) => label.name)))).filter(Boolean)])
+const milestones = computed(() => ['全部里程碑', ...Array.from(new Set(repositoryIssues.value.map((item) => item.milestone))).filter((item) => item !== '无')])
+const authors = computed(() => ['全部作者', ...Array.from(new Set(repositoryIssues.value.map((item) => item.author))).filter(Boolean)])
+const assignees = computed(() => ['全部指派人', ...Array.from(new Set(repositoryIssues.value.map((item) => item.assignee))).filter(Boolean)])
 
 function formatDate(value?: string | null) { if (!value) return '未设置'; const date = new Date(value); if (Number.isNaN(date.getTime())) return value; return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(date).replace(/\//g, '-') }
 function formatDateOnly(value?: string | null) { if (!value) return '未设置'; return value.slice(0, 10) }
@@ -145,6 +146,23 @@ async function getAllRepositoryIssues(repository: GiteaRepository) {
   return { items: all, total: total ?? all.length }
 }
 
+async function loadSelectedRepository() {
+  const repository = repositories.value.find((item) => item.full_name === selectedRepo.value)
+  if (!repository) { issues.value = []; return }
+  loading.value = true
+  loadError.value = ''
+  try {
+    const response = await getAllRepositoryIssues(repository)
+    sourceIssueTotals.value = { ...sourceIssueTotals.value, [repository.full_name]: response.total }
+    issues.value = response.items.map((issue) => mapIssue(issue, repository))
+    selectedIssues.value = []
+  } catch (error) {
+    const typed = error as Error & { status?: number }
+    authRequired.value = typed.status === 401
+    loadError.value = typed.message
+  } finally { loading.value = false }
+}
+
 async function loadData() {
   loading.value = true
   loadError.value = ''
@@ -156,10 +174,11 @@ async function loadData() {
     stageConfig.value = stageResult.items.length ? stageResult.items : defaultStageConfig
     const result = await getRepositories()
     repositories.value = result.items
-    const responses = await Promise.all(result.items.map((repository) => getAllRepositoryIssues(repository)))
-    sourceIssueTotal.value = responses.reduce((sum, response) => sum + response.total, 0)
-    issues.value = responses.flatMap((response, index) => response.items.map((issue) => mapIssue(issue, result.items[index])))
     const match = window.location.pathname.match(/^\/([^/]+)\/([^/]+)\/issues\/(\d+)$/)
+    const routeRepository = match ? `${match[1]}/${match[2]}` : ''
+    if (routeRepository && result.items.some((repository) => repository.full_name === routeRepository)) selectedRepo.value = routeRepository
+    else if (!selectedRepo.value || !result.items.some((repository) => repository.full_name === selectedRepo.value)) selectedRepo.value = result.items[0]?.full_name ?? ''
+    await loadSelectedRepository()
     if (match) {
       const target = issues.value.find((issue) => issue.repository.owner === match[1] && issue.repository.name === match[2] && issue.number === Number(match[3]))
       if (target) await openIssue(target)
@@ -177,7 +196,7 @@ const filteredIssues = computed(() => issues.value.filter((issue) => {
   const textMatch = !searchTerm.value || `${issue.number} ${issue.title} ${issue.labels.map((label) => label.name).join(' ')}`.toLowerCase().includes(searchTerm.value.toLowerCase())
   const dateMatch = updatedRange.value.length !== 2 || (issue.updatedAt >= updatedRange.value[0] && issue.updatedAt <= updatedRange.value[1])
   return textMatch && dateMatch
-    && (selectedRepo.value === '全部仓库' || issue.repo === selectedRepo.value)
+    && issue.repo === selectedRepo.value
     && (selectedProject.value === '全部项目' || issue.projects.includes(selectedProject.value))
     && (selectedPriority.value === '全部优先级' || issue.priority === selectedPriority.value)
     && (selectedLabel.value === '全部标签' || issue.labels.some((label) => label.name === selectedLabel.value))
@@ -323,7 +342,7 @@ async function dropIssue(column: string) {
     await quickUpdate(issue, { stage: column, stageCode: stageConfig.value.find((item) => item.name === column)?.code })
   }
 }
-function resetFilters() { searchTerm.value = ''; selectedState.value = '全部'; selectedRepo.value = '全部仓库'; selectedProject.value = '全部项目'; selectedPriority.value = '全部优先级'; selectedLabel.value = '全部标签'; selectedMilestone.value = '全部里程碑'; selectedAuthor.value = '全部作者'; selectedAssignee.value = '全部指派人'; selectedType.value = '全部类型'; updatedRange.value = []; sortBy.value = sorts[0]; currentPage.value = 1 }
+function resetFilters() { searchTerm.value = ''; selectedState.value = '全部'; selectedRepo.value = repos.value[0] ?? ''; selectedProject.value = '全部项目'; selectedPriority.value = '全部优先级'; selectedLabel.value = '全部标签'; selectedMilestone.value = '全部里程碑'; selectedAuthor.value = '全部作者'; selectedAssignee.value = '全部指派人'; selectedType.value = '全部类型'; updatedRange.value = []; sortBy.value = sorts[0]; currentPage.value = 1 }
 function setBatchStage(code: string) { batchStageCode.value = code; batchSubStageCode.value = stageConfig.value.find((stage) => stage.code === code)?.substages[0]?.code ?? '' }
 function openBatchDialog() {
   if (!selectedIssues.value.length) return
@@ -362,7 +381,7 @@ async function login() { try { await fetch('/auth/logout', { method: 'POST', cre
 function cloneStageConfig(items: StageConfig[]) { return items.map((stage) => ({ id: stage.id, code: stage.code, name: stage.name, substages: stage.substages.map((substage) => ({ id: substage.id, code: substage.code, name: substage.name })) })) }
 function openStageSettings() { stageDraft.value = cloneStageConfig(stageConfig.value); detailMode.value = false; activeView.value = 'settings' }
 async function giteaSettingsSaved() {
-  currentUser.value = null; issues.value = []; repositories.value = []; selectedIssue.value = null; drawerVisible.value = false
+  currentUser.value = null; issues.value = []; repositories.value = []; sourceIssueTotals.value = {}; selectedRepo.value = ''; selectedIssue.value = null; drawerVisible.value = false
   authRequired.value = true; loadError.value = ''; readNotificationKeys.value = []
   await loadData()
 }
@@ -419,6 +438,7 @@ async function saveManagement() {
   }
 }
 
+watch(selectedRepo, (value, oldValue) => { selectedIssues.value = []; currentPage.value = 1; if (value && value !== oldValue && repositories.value.length && !loading.value) void loadSelectedRepository() })
 watch(visibleIssues, () => { currentPage.value = 1; boardLimits.value = Object.fromEntries([...stages.value, ...stageConfig.value.flatMap((stage) => stage.substages.map((substage) => substage.name))].map((column) => [column, 20])) })
 watch(activeView, (view) => { window.localStorage.setItem('gitea-pm-view', view) })
 onMounted(initializePage)
@@ -428,7 +448,7 @@ onMounted(initializePage)
   <el-container class="app-shell">
     <aside class="sidebar"><div class="brand"><span class="brand-mark">G</span><span>Gitea PM</span></div><nav class="nav"><div class="nav-title">工作台</div><div class="nav-item" :class="{ active: activeView === 'dashboard' }" @click="openDashboard"><el-icon><House /></el-icon><span>工作台首页</span></div><div class="nav-item" :class="{ active: activeView === 'board' || activeView === 'issues' }" @click="activeView = 'board'"><el-icon><Grid /></el-icon><span>项目看板</span></div><div class="nav-title settings-nav-title">系统</div><div class="nav-item" :class="{ active: activeView === 'settings' }" @click="openStageSettings"><el-icon><Setting /></el-icon><span>系统配置</span></div></nav><div class="sidebar-foot">Gitea PM<br />v0.1.0</div></aside>
     <el-container class="main">
-      <header class="topbar"><div class="topbar-left"><span class="page-title">{{ pageTitle }}</span><el-tag type="info" effect="plain">Gitea 数据源</el-tag></div><div class="topbar-right"><el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><button class="notification-button" title="通知"><el-icon><Bell /></el-icon><el-badge v-if="unreadNotifications.length" :value="unreadNotifications.length" :max="9" /></button></template><div class="notification-panel"><div class="notification-title">通知</div><div v-if="notifications.length === 0" class="muted">暂无新通知</div><button v-for="item in notifications" :key="item.key" class="notification-item" :class="{ unread: !readNotificationKeys.includes(item.key) }" @click="openNotification(item)"><strong>#{{ item.issue.number }} {{ item.issue.title }}</strong><span>{{ item.text }}</span></button></div></el-popover><div class="user"><el-avatar :size="30" :src="currentUser?.avatar_url ?? undefined" :icon="User" /><span>{{ currentUser?.display_name || currentUser?.login || '用户' }}</span></div></div></header>
+      <header class="topbar"><div class="topbar-left"><span class="page-title">{{ pageTitle }}</span><el-select v-if="repos.length" v-model="selectedRepo" class="repo-select" filterable placeholder="选择仓库" aria-label="选择仓库"><template #prefix>仓库</template><el-option v-for="repo in repos" :key="repo" :label="repo" :value="repo" /></el-select><el-tag type="info" effect="plain">Gitea 数据源</el-tag></div><div class="topbar-right"><el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><button class="notification-button" title="通知"><el-icon><Bell /></el-icon><el-badge v-if="unreadNotifications.length" :value="unreadNotifications.length" :max="9" /></button></template><div class="notification-panel"><div class="notification-title">通知</div><div v-if="notifications.length === 0" class="muted">暂无新通知</div><button v-for="item in notifications" :key="item.key" class="notification-item" :class="{ unread: !readNotificationKeys.includes(item.key) }" @click="openNotification(item)"><strong>#{{ item.issue.number }} {{ item.issue.title }}</strong><span>{{ item.text }}</span></button></div></el-popover><div class="user"><el-avatar :size="30" :src="currentUser?.avatar_url ?? undefined" :icon="User" /><span>{{ currentUser?.display_name || currentUser?.login || '用户' }}</span></div></div></header>
       <main class="content">
         <div v-if="authRequired && activeView !== 'settings'" class="auth-state"><h2>请先登录 Gitea</h2><p>使用 Gitea OAuth 登录后才能加载仓库和 Issue。</p><el-button type="primary" @click="login">登录 Gitea</el-button></div>
         <div v-else-if="loadError && activeView !== 'settings'" class="auth-state"><h2>数据加载失败</h2><p>{{ loadError }}</p><el-button @click="loadData">重试</el-button></div>
@@ -469,7 +489,7 @@ onMounted(initializePage)
               <el-popover placement="bottom-start" :width="220" trigger="click"><template #reference><button class="filter-button">指派人筛选 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in assignees" :key="item" class="popup-option" :class="{ selected: selectedAssignee === item }" @click="selectedAssignee = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="180" trigger="click"><template #reference><button class="filter-button">类型筛选 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in types" :key="item" class="popup-option" :class="{ selected: selectedType === item }" @click="selectedType = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="220" trigger="click"><template #reference><button class="filter-button">排序 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in sorts" :key="item" class="popup-option" :class="{ selected: sortBy === item }" @click="sortBy = item">{{ item }}</button></div></el-popover>
-              <el-popover placement="bottom-end" :width="360" trigger="click"><template #reference><button class="filter-button">更多筛选 <span>⌄</span></button></template><div class="filter-popup extra-filter"><div class="extra-title">更多筛选</div><el-date-picker v-model="updatedRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="更新时间起" end-placeholder="更新时间止" /><el-select v-model="selectedRepo" placeholder="仓库"><el-option v-for="item in repos" :key="item" :label="item" :value="item" /></el-select><el-select v-model="selectedPriority" placeholder="优先级"><el-option label="全部优先级" value="全部优先级" /><el-option v-for="item in ['P0', 'P1', 'P2', 'P3']" :key="item" :label="item" :value="item" /></el-select><el-button link type="primary" @click="resetFilters"><el-icon><Refresh /></el-icon>重置筛选</el-button></div></el-popover><div class="mode-switch filter-mode-switch" role="group" aria-label="切换展示模式"><button class="mode-button" :class="{ active: activeView === 'board' }" title="看板模式" @click="activeView = 'board'"><el-icon><Grid /></el-icon></button><button class="mode-button" :class="{ active: activeView === 'issues' }" title="列表模式" @click="activeView = 'issues'"><el-icon><Connection /></el-icon></button></div>
+              <el-popover placement="bottom-end" :width="360" trigger="click"><template #reference><button class="filter-button">更多筛选 <span>⌄</span></button></template><div class="filter-popup extra-filter"><div class="extra-title">更多筛选</div><el-date-picker v-model="updatedRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="更新时间起" end-placeholder="更新时间止" /><el-select v-model="selectedPriority" placeholder="优先级"><el-option label="全部优先级" value="全部优先级" /><el-option v-for="item in ['P0', 'P1', 'P2', 'P3']" :key="item" :label="item" :value="item" /></el-select><el-button link type="primary" @click="resetFilters"><el-icon><Refresh /></el-icon>重置筛选</el-button></div></el-popover><div class="mode-switch filter-mode-switch" role="group" aria-label="切换展示模式"><button class="mode-button" :class="{ active: activeView === 'board' }" title="看板模式" @click="activeView = 'board'"><el-icon><Grid /></el-icon></button><button class="mode-button" :class="{ active: activeView === 'issues' }" title="列表模式" @click="activeView = 'issues'"><el-icon><Connection /></el-icon></button></div>
             </div></div>
           </section>
           <div v-loading="loading" class="issue-content" :class="{ 'list-content': activeView === 'issues' }">
