@@ -237,7 +237,7 @@ function onColumnScroll(column: string, event: Event) {
   if (element.scrollTop + element.clientHeight >= element.scrollHeight - 80 && (boardLimits.value[column] ?? 20) < total) loadMore(column)
 }
 async function openIssue(issue: Issue) {
-  activeView.value = 'board'
+  // 详情页不改变当前展示模式；从列表进入后返回仍保持列表模式。
   selectedIssue.value = issue
   detailMode.value = true
   detailLoading.value = true
