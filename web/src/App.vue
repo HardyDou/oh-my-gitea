@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import GiteaSettings from './GiteaSettings.vue'
-import { ArrowLeft, Bell, Calendar, Connection, Grid, House, Moon, Setting, Sunny, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { ArrowLeft, Bell, Calendar, Connection, Grid, House, Monitor, Moon, Setting, Sunny, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
 import { addIssueComment, batchUpdateManagement, getIssueDetail, getIssues, getMe, getRepositories, getStageConfig, renderMarkdown, saveStageConfig, updateAssignee, updateIssueDueDate, updateManagement, uploadIssueAttachment, type AppUser, type GiteaComment, type GiteaIssue, type GiteaRepository, type StageConfig } from './api'
 
 type Stage = string
-type Theme = 'light' | 'dark'
+type Theme = 'light' | 'dark' | 'auto'
 type Priority = 'P0' | 'P1' | 'P2' | 'P3'
 type Issue = {
   number: number; title: string; type: '需求' | '缺陷'; stage: Stage; stageCode: string; subStage: string; subStageCode: string; priority: Priority; dueDate: string | null; assets: Array<{ id: number; name: string; size?: number; browser_download_url?: string; download_url?: string }>
@@ -44,8 +44,13 @@ const savedView = typeof window !== 'undefined' ? window.localStorage.getItem('g
 const preferredView = ref<'board' | 'issues'>(savedView === 'issues' ? 'issues' : 'board')
 const activeView = ref<'dashboard' | 'board' | 'issues' | 'settings'>(savedView === 'issues' ? 'issues' : savedView === 'dashboard' ? 'dashboard' : 'board')
 const savedTheme = typeof window !== 'undefined' ? window.localStorage.getItem('gitea-pm-theme') : null
-const theme = ref<'light' | 'dark'>(savedTheme === 'dark' ? 'dark' : 'light')
-if (typeof document !== 'undefined') document.documentElement.dataset.theme = theme.value
+const theme = ref<Theme>(savedTheme === 'dark' || savedTheme === 'auto' ? savedTheme : 'light')
+function applyTheme() {
+  const resolved = theme.value === 'auto' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : theme.value === 'auto' ? 'light' : theme.value
+  if (typeof document !== 'undefined') document.documentElement.dataset.theme = resolved
+}
+applyTheme()
+if (typeof window !== 'undefined') window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (theme.value === 'auto') applyTheme() })
 const currentPage = ref(1)
 const pageSize = ref(20)
 const boardLimits = ref<Record<string, number>>({})
@@ -396,7 +401,7 @@ function removeFilter(item: string) {
 }
 function resetFilters() { searchTerm.value = ''; selectedState.value = '全部'; selectedRepo.value = repos.value[0] ?? ''; selectedProject.value = '全部项目'; selectedStage.value = '全部阶段'; selectedSubStages.value = []; selectedPriorities.value = []; selectedLabels.value = []; selectedMilestone.value = '全部里程碑'; selectedAuthors.value = []; selectedAssignees.value = []; selectedType.value = '全部类型'; updatedRange.value = []; sortBy.value = sorts[0]; currentPage.value = 1 }
 function setIssueView(view: 'board' | 'issues') { preferredView.value = view; activeView.value = view; window.localStorage.setItem('gitea-pm-view', view) }
-function setTheme(value: string | number | Theme) { const next = value === 'dark' ? 'dark' : 'light'; theme.value = next; document.documentElement.dataset.theme = next; window.localStorage.setItem('gitea-pm-theme', next) }
+function setTheme(value: string | number | Theme) { const next: Theme = value === 'dark' || value === 'auto' ? value : 'light'; theme.value = next; applyTheme(); window.localStorage.setItem('gitea-pm-theme', next) }
 function openProjectView() { activeView.value = preferredView.value }
 function setBatchStage(code: string) { batchStageCode.value = code; batchSubStageCode.value = stageConfig.value.find((stage) => stage.code === code)?.substages[0]?.code ?? '' }
 function openBatchDialog() {
@@ -505,7 +510,7 @@ onMounted(initializePage)
   <el-container class="app-shell">
     <aside class="sidebar"><div class="brand"><span class="brand-mark">G</span><span>Gitea PM</span></div><nav class="nav"><div class="nav-title">工作台</div><div class="nav-item" :class="{ active: activeView === 'dashboard' }" @click="openDashboard"><el-icon><House /></el-icon><span>工作台首页</span></div><div class="nav-item" :class="{ active: activeView === 'board' || activeView === 'issues' }" @click="openProjectView"><el-icon><Grid /></el-icon><span>项目看板</span></div><div class="nav-title settings-nav-title">系统</div><div class="nav-item" :class="{ active: activeView === 'settings' }" @click="openStageSettings"><el-icon><Setting /></el-icon><span>系统配置</span></div></nav><div class="sidebar-foot">Gitea PM<br />v0.1.0</div></aside>
     <el-container class="main">
-      <header class="topbar"><div class="topbar-left"><span class="page-title">{{ pageTitle }}</span><el-select v-if="repos.length" v-model="selectedRepo" class="repo-select" filterable placeholder="选择仓库" aria-label="选择仓库"><template #prefix>仓库</template><el-option v-for="repo in repos" :key="repo" :label="repo" :value="repo" /></el-select><el-tag type="info" effect="plain">Gitea 数据源</el-tag></div><div class="topbar-right"><el-dropdown class="theme-dropdown" trigger="click" @command="setTheme"><button class="theme-button" type="button"><el-icon><Moon v-if="theme === 'dark'" /><Sunny v-else /></el-icon><span>主题</span></button><template #dropdown><el-dropdown-menu><el-dropdown-item command="light"><Sunny /> 浅色</el-dropdown-item><el-dropdown-item command="dark"><Moon /> 深色</el-dropdown-item></el-dropdown-menu></template></el-dropdown><el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><button class="notification-button" title="通知"><el-icon><Bell /></el-icon><el-badge v-if="unreadNotifications.length" :value="unreadNotifications.length" :max="9" /></button></template><div class="notification-panel"><div class="notification-title">通知</div><div v-if="notifications.length === 0" class="muted">暂无新通知</div><button v-for="item in notifications" :key="item.key" class="notification-item" :class="{ unread: !readNotificationKeys.includes(item.key) }" @click="openNotification(item)"><strong>#{{ item.issue.number }} {{ item.issue.title }}</strong><span>{{ item.text }}</span></button></div></el-popover><div class="user"><el-avatar :size="30" :src="currentUser?.avatar_url ?? undefined" :icon="User" /><span>{{ currentUser?.display_name || currentUser?.login || '用户' }}</span></div></div></header>
+      <header class="topbar"><div class="topbar-left"><span class="page-title">{{ pageTitle }}</span><el-select v-if="repos.length" v-model="selectedRepo" class="repo-select" filterable placeholder="选择仓库" aria-label="选择仓库"><template #prefix>仓库</template><el-option v-for="repo in repos" :key="repo" :label="repo" :value="repo" /></el-select><el-tag type="info" effect="plain">Gitea 数据源</el-tag></div><div class="topbar-right"><el-dropdown class="theme-dropdown" trigger="click" @command="setTheme"><button class="theme-button" type="button"><el-icon><Monitor v-if="theme === 'auto'" /><Moon v-else-if="theme === 'dark'" /><Sunny v-else /></el-icon><span>主题</span></button><template #dropdown><el-dropdown-menu><el-dropdown-item command="auto"><Monitor /> 自动（跟随系统）</el-dropdown-item><el-dropdown-item command="light"><Sunny /> 浅色</el-dropdown-item><el-dropdown-item command="dark"><Moon /> 深色</el-dropdown-item></el-dropdown-menu></template></el-dropdown><el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><button class="notification-button" title="通知"><el-icon><Bell /></el-icon><el-badge v-if="unreadNotifications.length" :value="unreadNotifications.length" :max="9" /></button></template><div class="notification-panel"><div class="notification-title">通知</div><div v-if="notifications.length === 0" class="muted">暂无新通知</div><button v-for="item in notifications" :key="item.key" class="notification-item" :class="{ unread: !readNotificationKeys.includes(item.key) }" @click="openNotification(item)"><strong>#{{ item.issue.number }} {{ item.issue.title }}</strong><span>{{ item.text }}</span></button></div></el-popover><div class="user"><el-avatar :size="30" :src="currentUser?.avatar_url ?? undefined" :icon="User" /><span>{{ currentUser?.display_name || currentUser?.login || '用户' }}</span></div></div></header>
       <main class="content">
         <div v-if="authRequired && activeView !== 'settings'" class="auth-state"><h2>请先登录 Gitea</h2><p>使用 Gitea OAuth 登录后才能加载仓库和 Issue。</p><el-button type="primary" @click="login">登录 Gitea</el-button></div>
         <div v-else-if="loadError && activeView !== 'settings'" class="auth-state"><h2>数据加载失败</h2><p>{{ loadError }}</p><el-button @click="loadData">重试</el-button></div>

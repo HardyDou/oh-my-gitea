@@ -33,7 +33,7 @@ button, input, select { font: inherit; }
 .mode-button:hover:not(.active) { color: #1478b7; }
 .filter-mode-switch { flex: 0 0 auto; }
 .page-title { font-size: 18px; font-weight: 700; }
-.repo-select { width: 210px; }
+.repo-select { width: 380px; }
 .project-select { width: 190px; }
 .user { display: flex; align-items: center; gap: 10px; font-size: 13px; color: #566176; }
 .notification-button { position: relative; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 0; border-radius: 7px; background: transparent; color: #566176; cursor: pointer; font-size: 18px; }
