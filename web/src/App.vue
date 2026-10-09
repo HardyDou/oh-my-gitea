@@ -490,7 +490,10 @@ watch([selectedRepo, selectedProject, selectedStage, selectedSubStages, selected
   window.localStorage.setItem('gitea-pm-filters', JSON.stringify({ repo: selectedRepo.value, project: selectedProject.value, stage: selectedStage.value, subStages: selectedSubStages.value, priorities: selectedPriorities.value, labels: selectedLabels.value, milestone: selectedMilestone.value, authors: selectedAuthors.value, assignees: selectedAssignees.value, type: selectedType.value, updatedRange: updatedRange.value, sortBy: sortBy.value, searchTerm: searchTerm.value, state: selectedState.value }))
 }, { deep: true })
 watch(visibleIssues, () => { currentPage.value = 1; boardLimits.value = Object.fromEntries([...stages.value, ...stageConfig.value.flatMap((stage) => stage.substages.map((substage) => substage.name))].map((column) => [column, 20])) })
-watch(activeView, (view) => { window.localStorage.setItem('gitea-pm-view', view) })
+watch(activeView, (view) => {
+  // 只记住看板/列表偏好；进入工作台或系统配置不应覆盖下次进入的展示模式。
+  if (view === 'board' || view === 'issues') window.localStorage.setItem('gitea-pm-view', view)
+})
 onMounted(initializePage)
 </script>
 
