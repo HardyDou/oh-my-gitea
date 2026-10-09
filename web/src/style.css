@@ -107,8 +107,11 @@ button, input, select { font: inherit; }
 .issue-title-link:hover { text-decoration: underline; }
 .batch-dialog-hint { margin: 0 0 18px; color: #68748a; font-size: 13px; line-height: 1.6; }
 .filter-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
-.active-filter-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding-top: 10px; color: #7c8799; font-size: 12px; }
-.active-filter-summary > span { margin-right: 2px; }
+.filter-nav-reference { position: relative; }
+.filter-nav-reference .el-badge { margin-left: auto; }
+.filter-summary-popover { display: flex; flex-direction: column; gap: 12px; }
+.filter-summary-title { color: #303b50; font-size: 13px; font-weight: 600; }
+.filter-summary-tags { display: flex; flex-wrap: wrap; gap: 6px; max-height: 180px; overflow-y: auto; }
 .state-tabs { display: flex; flex: 0 0 auto; border: 1px solid #dfe4ed; border-radius: 6px; overflow: hidden; }
 .state-tab { border: 0; border-right: 1px solid #dfe4ed; background: #fff; color: #68748a; padding: 8px 15px; cursor: pointer; font-size: 13px; }
 .state-tab:last-child { border-right: 0; }
