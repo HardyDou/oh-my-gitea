@@ -116,7 +116,7 @@ button, input, select { font: inherit; }
 .filter-text-option.active { background: #eef4ff; color: #326bd5; font-weight: 600; }
 .reset-filter-text { margin-left: auto; color: #326bd5; }
 .filter-line .el-date-editor { width: 280px; }
-.filter-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
+.filter-row { display: flex; align-items: center; justify-content: flex-start; gap: 14px; min-width: 0; }
 .filter-nav-reference { position: relative; }
 .filter-nav-reference .el-badge { margin-left: auto; }
 .filter-summary-popover { display: flex; flex-direction: column; gap: 12px; }
@@ -127,7 +127,7 @@ button, input, select { font: inherit; }
 .state-tab { border: 0; border-right: 1px solid #dfe4ed; background: #fff; color: #68748a; padding: 8px 15px; cursor: pointer; font-size: 13px; }
 .state-tab:last-child { border-right: 0; }
 .state-tab.active { background: #f0f4fb; color: #356bd8; font-weight: 600; }
-.quick-filters { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; flex: 1; overflow-x: auto; padding-bottom: 1px; }
+.quick-filters { display: flex; align-items: center; justify-content: flex-start; gap: 8px; min-width: 0; flex: 0 0 auto; overflow-x: auto; padding-bottom: 1px; }
 .filter-button { flex: 0 0 auto; border: 0; background: transparent; color: #536078; padding: 8px 10px; cursor: pointer; font-size: 13px; white-space: nowrap; border-radius: 5px; }
 .filter-button:hover { background: #f0f3f8; color: #2f65cc; }
 .filter-button span { color: #8a95a7; margin-left: 4px; }
