@@ -208,6 +208,7 @@ button, input, select { font: inherit; }
 .issue-checklist label.done { color: #9aa3b2; text-decoration: line-through; }
 .markdown-body { white-space: pre-wrap; color: #59657a; font-size: 14px; line-height: 1.75; }
 .rendered-markdown { white-space: normal; }
+.rendered-markdown p, .rendered-markdown li { white-space: pre-wrap; }
 .rendered-markdown p { margin: 0 0 12px; }
 .rendered-markdown pre { overflow-x: auto; background: #f3f5f8; padding: 12px; border-radius: 5px; }
 .rendered-markdown code { background: #f0f2f5; border-radius: 3px; padding: 2px 4px; }
