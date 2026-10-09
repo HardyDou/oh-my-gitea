@@ -250,6 +250,112 @@ button, input, select { font: inherit; }
 .detail-description { background: #f7f8fb; padding: 13px; border-radius: 6px; color: #59657a; font-size: 13px; line-height: 1.7; }
 .flow-item { font-size: 12px; color: #667187; }
 .el-drawer__header { margin-bottom: 0; }
+.theme-button { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 9px; border: 1px solid #e3e7ef; border-radius: 6px; background: transparent; color: #566176; cursor: pointer; font-size: 13px; }
+.theme-button:hover { background: #f1f4f8; color: #2f65cc; }
+.theme-dropdown .el-dropdown-menu__item { display: flex; align-items: center; gap: 8px; }
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --el-bg-color: #242629;
+  --el-bg-color-page: #1e2022;
+  --el-bg-color-overlay: #2a2d31;
+  --el-fill-color-blank: #242629;
+  --el-fill-color-light: #2d3136;
+  --el-fill-color-lighter: #30343a;
+  --el-fill-color-extra-light: #292d31;
+  --el-border-color: #444a52;
+  --el-border-color-light: #3b4148;
+  --el-border-color-lighter: #353a40;
+  --el-text-color-primary: #d7dbe0;
+  --el-text-color-regular: #c0c6cd;
+  --el-text-color-secondary: #9da5ae;
+  --el-text-color-placeholder: #737c86;
+}
+html[data-theme='dark'] body { background: #1e2022; color: #d7dbe0; }
+html[data-theme='dark'] .topbar,
+html[data-theme='dark'] .issue-toolbar,
+html[data-theme='dark'] .issue-content,
+html[data-theme='dark'] .list-content,
+html[data-theme='dark'] .stat,
+html[data-theme='dark'] .dashboard-stat,
+html[data-theme='dark'] .dashboard-card,
+html[data-theme='dark'] .stage-config-card,
+html[data-theme='dark'] .detail-top,
+html[data-theme='dark'] .detail-main,
+html[data-theme='dark'] .sidebar-section { background: #242629; border-color: #3d4248; color: #d7dbe0; }
+html[data-theme='dark'] .sidebar { background: #181a1c; }
+html[data-theme='dark'] .topbar { border-bottom-color: #3d4248; }
+html[data-theme='dark'] .page-heading h1,
+html[data-theme='dark'] .dashboard-heading h1,
+html[data-theme='dark'] .dashboard-card h2,
+html[data-theme='dark'] .settings-heading h1,
+html[data-theme='dark'] .detail-page-title,
+html[data-theme='dark'] .sidebar-section h3,
+html[data-theme='dark'] .gitea-content h3,
+html[data-theme='dark'] .conversation-title,
+html[data-theme='dark'] .issue-checklist h3 { color: #d7dbe0; }
+html[data-theme='dark'] .page-heading p,
+html[data-theme='dark'] .dashboard-heading p,
+html[data-theme='dark'] .settings-heading p,
+html[data-theme='dark'] .dashboard-card-desc,
+html[data-theme='dark'] .user,
+html[data-theme='dark'] .filter-button,
+html[data-theme='dark'] .issue-number,
+html[data-theme='dark'] .issue-type,
+html[data-theme='dark'] .detail-meta,
+html[data-theme='dark'] .sidebar-section label,
+html[data-theme='dark'] .sidebar-row,
+html[data-theme='dark'] .history-time { color: #9da5ae; }
+html[data-theme='dark'] .column { background: #2a2d31; }
+html[data-theme='dark'] .column-head { background: #2a2d31; color: #d7dbe0; }
+html[data-theme='dark'] .issue-card { background: #242629; border-color: #41474e; color: #d7dbe0; box-shadow: none; }
+html[data-theme='dark'] .issue-card:hover { border-color: #6d8fc7; box-shadow: 0 4px 12px rgb(0 0 0 / 24%); }
+html[data-theme='dark'] .issue-title,
+html[data-theme='dark'] .dashboard-issue,
+html[data-theme='dark'] .sidebar-row b,
+html[data-theme='dark'] .history-event,
+html[data-theme='dark'] .history-event b { color: #d7dbe0; }
+html[data-theme='dark'] .state-tabs,
+html[data-theme='dark'] .mode-switch,
+html[data-theme='dark'] .theme-button { border-color: #444a52; background: #242629; }
+html[data-theme='dark'] .state-tab { background: #242629; border-color: #444a52; color: #9da5ae; }
+html[data-theme='dark'] .state-tab.active { background: #30363d; color: #79b8ff; }
+html[data-theme='dark'] .mode-button { color: #9da5ae; }
+html[data-theme='dark'] .theme-button { color: #c0c6cd; }
+html[data-theme='dark'] .theme-button:hover,
+html[data-theme='dark'] .notification-button:hover,
+html[data-theme='dark'] .filter-button:hover { background: #30363d; color: #79b8ff; }
+html[data-theme='dark'] .notification-button { color: #c0c6cd; }
+html[data-theme='dark'] .notification-item { border-color: #3d4248; }
+html[data-theme='dark'] .notification-item.unread { background: #2b3543; }
+html[data-theme='dark'] .comment-box,
+html[data-theme='dark'] .detail-description,
+html[data-theme='dark'] .markdown-preview { background: #2a2d31; border-color: #41474e; }
+html[data-theme='dark'] .gitea-content,
+html[data-theme='dark'] .detail-section,
+html[data-theme='dark'] .conversation-title,
+html[data-theme='dark'] .issue-checklist { border-color: #3d4248; }
+html[data-theme='dark'] .rendered-markdown,
+html[data-theme='dark'] .markdown-body,
+html[data-theme='dark'] .issue-checklist label { color: #c0c6cd; }
+html[data-theme='dark'] .rendered-markdown pre,
+html[data-theme='dark'] .rendered-markdown code { background: #1e2022; }
+html[data-theme='dark'] .dashboard-issue,
+html[data-theme='dark'] .sidebar-row,
+html[data-theme='dark'] .attachment-link,
+html[data-theme='dark'] .notification-item { border-color: #3d4248; }
+html[data-theme='dark'] .popup-option,
+html[data-theme='dark'] .filter-text-option { color: #c0c6cd; }
+html[data-theme='dark'] .popup-option:hover,
+html[data-theme='dark'] .popup-option.selected,
+html[data-theme='dark'] .filter-text-option:hover,
+html[data-theme='dark'] .filter-text-option.active { background: #303b4a; color: #79b8ff; }
+html[data-theme='dark'] .el-popper,
+html[data-theme='dark'] .el-dialog,
+html[data-theme='dark'] .el-message-box,
+html[data-theme='dark'] .el-dropdown-menu { background: #242629; border-color: #444a52; color: #d7dbe0; }
+html[data-theme='dark'] .el-popper__arrow::before { background: #242629; border-color: #444a52; }
+html[data-theme='dark'] .el-dropdown-menu__item { color: #c0c6cd; }
+html[data-theme='dark'] .el-dropdown-menu__item:hover { background: #30363d; color: #79b8ff; }
 @media (max-width: 900px) { .detail-layout { grid-template-columns: 1fr; } .detail-sidebar { order: -1; } }
 @media (max-width: 1250px) { .content { padding-left: 20px; padding-right: 20px; } .topbar { padding: 0 20px; } .filter-row { align-items: flex-start; flex-direction: column; } .state-tabs, .quick-filters { width: 100%; } .quick-filters { justify-content: flex-start; } }
 @media (max-width: 700px) { .topbar-right { gap: 10px; } .topbar-right .user span { display: none; } .dashboard-stats, .dashboard-grid { grid-template-columns: 1fr; } .dashboard-wide { grid-column: auto; } }
