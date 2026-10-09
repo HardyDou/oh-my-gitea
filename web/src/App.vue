@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import GiteaSettings from './GiteaSettings.vue'
-import { ArrowLeft, Bell, Calendar, Connection, Filter, Grid, House, Setting, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { ArrowLeft, Bell, Calendar, Connection, Grid, House, Setting, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
 import { addIssueComment, batchUpdateManagement, getIssueDetail, getIssues, getMe, getRepositories, getStageConfig, renderMarkdown, saveStageConfig, updateAssignee, updateIssueDueDate, updateManagement, uploadIssueAttachment, type AppUser, type GiteaComment, type GiteaIssue, type GiteaRepository, type StageConfig } from './api'
 
@@ -22,12 +22,18 @@ const states = ['全部', '开放', '已关闭']
 const selectedRepo = ref(savedFilters.repo ?? '')
 const selectedProject = ref(savedFilters.project ?? '全部项目')
 const selectedStage = ref(savedFilters.stage ?? '全部阶段')
-const selectedSubStage = ref(savedFilters.subStage ?? '全部状态')
-const selectedPriority = ref(savedFilters.priority ?? '全部优先级')
-const selectedLabel = ref(savedFilters.label ?? '全部标签')
+const selectedSubStages = ref<string[]>(Array.isArray(savedFilters.subStages) ? savedFilters.subStages : (savedFilters.subStage && savedFilters.subStage !== '全部状态' ? [savedFilters.subStage] : []))
+const selectedPriorities = ref<string[]>(Array.isArray(savedFilters.priorities) ? savedFilters.priorities : (savedFilters.priority && savedFilters.priority !== '全部优先级' ? [savedFilters.priority] : []))
+const selectedLabels = ref<string[]>(Array.isArray(savedFilters.labels) ? savedFilters.labels : (savedFilters.label && savedFilters.label !== '全部标签' ? [savedFilters.label] : []))
 const selectedMilestone = ref(savedFilters.milestone ?? '全部里程碑')
-const selectedAuthor = ref(savedFilters.author ?? '全部作者')
-const selectedAssignee = ref(savedFilters.assignee ?? '全部指派人')
+const selectedAuthors = ref<string[]>(Array.isArray(savedFilters.authors) ? savedFilters.authors : (savedFilters.author && savedFilters.author !== '全部作者' ? [savedFilters.author] : []))
+const selectedAssignees = ref<string[]>(Array.isArray(savedFilters.assignees) ? savedFilters.assignees : (savedFilters.assignee && savedFilters.assignee !== '全部指派人' ? [savedFilters.assignee] : []))
+// 兼容旧版隐藏筛选模板；实际筛选使用上面的单选/多选状态。
+const selectedSubStage = ref('全部状态')
+const selectedPriority = ref('全部优先级')
+const selectedLabel = ref('全部标签')
+const selectedAuthor = ref('全部作者')
+const selectedAssignee = ref('全部指派人')
 const selectedType = ref(savedFilters.type ?? '全部类型')
 const updatedRange = ref<string[]>(Array.isArray(savedFilters.updatedRange) ? savedFilters.updatedRange : [])
 const sortBy = ref(sorts.includes(savedFilters.sortBy) ? savedFilters.sortBy : sorts[0])
@@ -82,7 +88,7 @@ const selectedIssueSubstages = computed(() => stageConfig.value.find((stage) => 
 const batchSubstages = computed(() => stageConfig.value.find((stage) => stage.code === batchStageCode.value)?.substages ?? [])
 const checklistItems = computed(() => { const body = selectedIssue.value?.description ?? ''; return [...body.matchAll(/^- \[([ xX])\] (.+)$/gm)].map((match) => ({ done: match[1].toLowerCase() === 'x', text: match[2] })) })
 const pagedIssues = computed(() => visibleIssues.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
-const hasOnlyStateFilter = computed(() => !searchTerm.value && Boolean(selectedRepo.value) && selectedProject.value === '全部项目' && selectedStage.value === '全部阶段' && selectedSubStage.value === '全部状态' && selectedPriority.value === '全部优先级' && selectedLabel.value === '全部标签' && selectedMilestone.value === '全部里程碑' && selectedAuthor.value === '全部作者' && selectedAssignee.value === '全部指派人' && selectedType.value === '全部类型' && updatedRange.value.length !== 2)
+const hasOnlyStateFilter = computed(() => !searchTerm.value && Boolean(selectedRepo.value) && selectedProject.value === '全部项目' && selectedStage.value === '全部阶段' && selectedSubStages.value.length === 0 && selectedPriorities.value.length === 0 && selectedLabels.value.length === 0 && selectedMilestone.value === '全部里程碑' && selectedAuthors.value.length === 0 && selectedAssignees.value.length === 0 && selectedType.value === '全部类型' && updatedRange.value.length !== 2)
 const issueDisplayTotal = computed(() => hasOnlyStateFilter.value && selectedState.value === '全部' && sourceIssueTotals.value[selectedRepo.value] !== undefined ? sourceIssueTotals.value[selectedRepo.value] : visibleIssues.value.length)
 function sameUser(left: string | undefined, right: string | undefined) { return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase()) }
 const repositoryIssues = computed(() => issues.value.filter((issue) => !selectedRepo.value || issue.repo === selectedRepo.value))
@@ -108,12 +114,12 @@ const activeFilterSummary = computed(() => {
   if (searchTerm.value) items.push(`搜索：${searchTerm.value}`)
   if (selectedProject.value !== '全部项目') items.push(`项目：${selectedProject.value}`)
   if (selectedStage.value !== '全部阶段') items.push(`阶段：${selectedStage.value}`)
-  if (selectedSubStage.value !== '全部状态') items.push(`子状态：${selectedSubStage.value}`)
-  if (selectedPriority.value !== '全部优先级') items.push(`优先级：${selectedPriority.value}`)
-  if (selectedLabel.value !== '全部标签') items.push(`标签：${selectedLabel.value}`)
+  if (selectedSubStages.value.length) items.push(`子状态：${selectedSubStages.value.join('、')}`)
+  if (selectedPriorities.value.length) items.push(`优先级：${selectedPriorities.value.join('、')}`)
+  if (selectedLabels.value.length) items.push(`标签：${selectedLabels.value.join('、')}`)
   if (selectedMilestone.value !== '全部里程碑') items.push(`里程碑：${selectedMilestone.value}`)
-  if (selectedAuthor.value !== '全部作者') items.push(`作者：${selectedAuthor.value}`)
-  if (selectedAssignee.value !== '全部指派人') items.push(`指派人：${selectedAssignee.value}`)
+  if (selectedAuthors.value.length) items.push(`作者：${selectedAuthors.value.join('、')}`)
+  if (selectedAssignees.value.length) items.push(`指派人：${selectedAssignees.value.join('、')}`)
   if (selectedType.value !== '全部类型') items.push(`类型：${selectedType.value}`)
   if (updatedRange.value.length === 2) items.push(`更新时间：${updatedRange.value[0]} 至 ${updatedRange.value[1]}`)
   if (sortBy.value !== sorts[0]) items.push(`排序：${sortBy.value}`)
@@ -222,12 +228,12 @@ const filteredIssues = computed(() => issues.value.filter((issue) => {
     && issue.repo === selectedRepo.value
     && (selectedProject.value === '全部项目' || issue.projects.includes(selectedProject.value))
     && (selectedStage.value === '全部阶段' || issue.stage === selectedStage.value)
-    && (selectedSubStage.value === '全部状态' || issue.subStage === selectedSubStage.value)
-    && (selectedPriority.value === '全部优先级' || issue.priority === selectedPriority.value)
-    && (selectedLabel.value === '全部标签' || issue.labels.some((label) => label.name === selectedLabel.value))
+    && (!selectedSubStages.value.length || selectedSubStages.value.includes(issue.subStage))
+    && (!selectedPriorities.value.length || selectedPriorities.value.includes(issue.priority))
+    && (!selectedLabels.value.length || issue.labels.some((label) => selectedLabels.value.includes(label.name)))
     && (selectedMilestone.value === '全部里程碑' || issue.milestone === selectedMilestone.value)
-    && (selectedAuthor.value === '全部作者' || issue.author === selectedAuthor.value)
-    && (selectedAssignee.value === '全部指派人' || issue.assignee === selectedAssignee.value)
+    && (!selectedAuthors.value.length || selectedAuthors.value.includes(issue.author))
+    && (!selectedAssignees.value.length || selectedAssignees.value.includes(issue.assignee))
     && (selectedType.value === '全部类型' || issue.type === selectedType.value)
 }))
 const stateCounts = computed(() => ({
@@ -367,8 +373,8 @@ async function dropIssue(column: string) {
     await quickUpdate(issue, { stage: column, stageCode: stageConfig.value.find((item) => item.name === column)?.code })
   }
 }
-function setStageFilter(stage: string) { selectedStage.value = stage; selectedSubStage.value = '全部状态' }
-function resetFilters() { searchTerm.value = ''; selectedState.value = '全部'; selectedRepo.value = repos.value[0] ?? ''; selectedProject.value = '全部项目'; selectedStage.value = '全部阶段'; selectedSubStage.value = '全部状态'; selectedPriority.value = '全部优先级'; selectedLabel.value = '全部标签'; selectedMilestone.value = '全部里程碑'; selectedAuthor.value = '全部作者'; selectedAssignee.value = '全部指派人'; selectedType.value = '全部类型'; updatedRange.value = []; sortBy.value = sorts[0]; currentPage.value = 1 }
+function setStageFilter(stage: string) { selectedStage.value = stage; selectedSubStages.value = [] }
+function resetFilters() { searchTerm.value = ''; selectedState.value = '全部'; selectedRepo.value = repos.value[0] ?? ''; selectedProject.value = '全部项目'; selectedStage.value = '全部阶段'; selectedSubStages.value = []; selectedPriorities.value = []; selectedLabels.value = []; selectedMilestone.value = '全部里程碑'; selectedAuthors.value = []; selectedAssignees.value = []; selectedType.value = '全部类型'; updatedRange.value = []; sortBy.value = sorts[0]; currentPage.value = 1 }
 function setBatchStage(code: string) { batchStageCode.value = code; batchSubStageCode.value = stageConfig.value.find((stage) => stage.code === code)?.substages[0]?.code ?? '' }
 function openBatchDialog() {
   if (!selectedIssues.value.length) return
@@ -465,8 +471,8 @@ async function saveManagement() {
 }
 
 watch(selectedRepo, (value, oldValue) => { selectedIssues.value = []; currentPage.value = 1; if (value && value !== oldValue && repositories.value.length && !loading.value) void loadSelectedRepository() })
-watch([selectedRepo, selectedProject, selectedStage, selectedSubStage, selectedPriority, selectedLabel, selectedMilestone, selectedAuthor, selectedAssignee, selectedType, updatedRange, sortBy, searchTerm, selectedState], () => {
-  window.localStorage.setItem('gitea-pm-filters', JSON.stringify({ repo: selectedRepo.value, project: selectedProject.value, stage: selectedStage.value, subStage: selectedSubStage.value, priority: selectedPriority.value, label: selectedLabel.value, milestone: selectedMilestone.value, author: selectedAuthor.value, assignee: selectedAssignee.value, type: selectedType.value, updatedRange: updatedRange.value, sortBy: sortBy.value, searchTerm: searchTerm.value, state: selectedState.value }))
+watch([selectedRepo, selectedProject, selectedStage, selectedSubStages, selectedPriorities, selectedLabels, selectedMilestone, selectedAuthors, selectedAssignees, selectedType, updatedRange, sortBy, searchTerm, selectedState], () => {
+  window.localStorage.setItem('gitea-pm-filters', JSON.stringify({ repo: selectedRepo.value, project: selectedProject.value, stage: selectedStage.value, subStages: selectedSubStages.value, priorities: selectedPriorities.value, labels: selectedLabels.value, milestone: selectedMilestone.value, authors: selectedAuthors.value, assignees: selectedAssignees.value, type: selectedType.value, updatedRange: updatedRange.value, sortBy: sortBy.value, searchTerm: searchTerm.value, state: selectedState.value }))
 }, { deep: true })
 watch(visibleIssues, () => { currentPage.value = 1; boardLimits.value = Object.fromEntries([...stages.value, ...stageConfig.value.flatMap((stage) => stage.substages.map((substage) => substage.name))].map((column) => [column, 20])) })
 watch(activeView, (view) => { window.localStorage.setItem('gitea-pm-view', view) })
@@ -475,7 +481,7 @@ onMounted(initializePage)
 
 <template>
   <el-container class="app-shell">
-    <aside class="sidebar"><div class="brand"><span class="brand-mark">G</span><span>Gitea PM</span></div><nav class="nav"><div class="nav-title">工作台</div><div class="nav-item" :class="{ active: activeView === 'dashboard' }" @click="openDashboard"><el-icon><House /></el-icon><span>工作台首页</span></div><div class="nav-item" :class="{ active: activeView === 'board' || activeView === 'issues' }" @click="activeView = 'board'"><el-icon><Grid /></el-icon><span>项目看板</span></div><el-popover v-if="activeFilterSummary.length" placement="right-start" :width="310" trigger="click"><template #reference><div class="nav-item filter-nav-reference"><el-icon><Filter /></el-icon><span>当前筛选</span><el-badge :value="activeFilterSummary.length" /></div></template><div class="filter-summary-popover"><div class="filter-summary-title">当前筛选条件</div><div class="filter-summary-tags"><el-tag v-for="item in activeFilterSummary" :key="item" size="small" effect="plain">{{ item }}</el-tag></div><el-button link type="primary" @click="resetFilters">清除筛选</el-button></div></el-popover><div class="nav-title settings-nav-title">系统</div><div class="nav-item" :class="{ active: activeView === 'settings' }" @click="openStageSettings"><el-icon><Setting /></el-icon><span>系统配置</span></div></nav><div class="sidebar-foot">Gitea PM<br />v0.1.0</div></aside>
+    <aside class="sidebar"><div class="brand"><span class="brand-mark">G</span><span>Gitea PM</span></div><nav class="nav"><div class="nav-title">工作台</div><div class="nav-item" :class="{ active: activeView === 'dashboard' }" @click="openDashboard"><el-icon><House /></el-icon><span>工作台首页</span></div><div class="nav-item" :class="{ active: activeView === 'board' || activeView === 'issues' }" @click="activeView = 'board'"><el-icon><Grid /></el-icon><span>项目看板</span></div><div class="nav-title settings-nav-title">系统</div><div class="nav-item" :class="{ active: activeView === 'settings' }" @click="openStageSettings"><el-icon><Setting /></el-icon><span>系统配置</span></div></nav><div class="sidebar-foot">Gitea PM<br />v0.1.0</div></aside>
     <el-container class="main">
       <header class="topbar"><div class="topbar-left"><span class="page-title">{{ pageTitle }}</span><el-select v-if="repos.length" v-model="selectedRepo" class="repo-select" filterable placeholder="选择仓库" aria-label="选择仓库"><template #prefix>仓库</template><el-option v-for="repo in repos" :key="repo" :label="repo" :value="repo" /></el-select><el-tag type="info" effect="plain">Gitea 数据源</el-tag></div><div class="topbar-right"><el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><button class="notification-button" title="通知"><el-icon><Bell /></el-icon><el-badge v-if="unreadNotifications.length" :value="unreadNotifications.length" :max="9" /></button></template><div class="notification-panel"><div class="notification-title">通知</div><div v-if="notifications.length === 0" class="muted">暂无新通知</div><button v-for="item in notifications" :key="item.key" class="notification-item" :class="{ unread: !readNotificationKeys.includes(item.key) }" @click="openNotification(item)"><strong>#{{ item.issue.number }} {{ item.issue.title }}</strong><span>{{ item.text }}</span></button></div></el-popover><div class="user"><el-avatar :size="30" :src="currentUser?.avatar_url ?? undefined" :icon="User" /><span>{{ currentUser?.display_name || currentUser?.login || '用户' }}</span></div></div></header>
       <main class="content">
@@ -509,8 +515,22 @@ onMounted(initializePage)
           </template>
           <template v-else>
           <section class="issue-toolbar">
-            <div class="search-row"><el-input v-model="searchTerm" class="issue-search" placeholder="搜索 Issue 标题、编号或标签" clearable><template #suffix><el-icon><Search /></el-icon></template></el-input><el-button v-if="activeView === 'issues' && selectedIssues.length" type="primary" plain @click="openBatchDialog">批量修改（{{ selectedIssues.length }}）</el-button><el-button type="primary"><el-icon><Plus /></el-icon>创建 Issue</el-button></div>
-            <div class="filter-row"><div class="state-tabs"><button v-for="state in states" :key="state" class="state-tab" :class="{ active: selectedState === state }" @click="selectedState = state">{{ state }} <span>{{ stateCount(state) }}</span></button></div><div class="quick-filters">
+            <div class="search-row"><el-input v-model="searchTerm" class="issue-search" placeholder="搜索 Issue 标题、编号或标签" clearable><template #suffix><el-icon><Search /></el-icon></template></el-input><el-button v-if="activeView === 'issues' && selectedIssues.length" type="primary" plain @click="openBatchDialog">批量修改（{{ selectedIssues.length }}）</el-button><el-button type="primary"><el-icon><Plus /></el-icon>创建 Issue</el-button><div class="mode-switch filter-mode-switch" role="group" aria-label="切换展示模式"><button class="mode-button" :class="{ active: activeView === 'board' }" title="看板模式" @click="activeView = 'board'"><el-icon><Grid /></el-icon></button><button class="mode-button" :class="{ active: activeView === 'issues' }" title="列表模式" @click="activeView = 'issues'"><el-icon><Connection /></el-icon></button></div></div>
+            <div class="filter-panel">
+              <div class="filter-line"><strong>状态</strong><el-radio-group v-model="selectedState"><el-radio-button v-for="item in states" :key="item" :label="item">{{ item }} {{ stateCount(item) }}</el-radio-button></el-radio-group></div>
+              <div class="filter-line"><strong>项目</strong><el-radio-group v-model="selectedProject"><el-radio-button v-for="item in projects" :key="item" :label="item">{{ item }}</el-radio-button></el-radio-group></div>
+              <div class="filter-line"><strong>阶段</strong><el-radio-group v-model="selectedStage" @change="setStageFilter"><el-radio-button v-for="item in stageFilters" :key="item" :label="item">{{ item }}</el-radio-button></el-radio-group></div>
+              <div class="filter-line"><strong>子状态</strong><el-button size="small" :type="selectedSubStages.length ? 'default' : 'primary'" @click="selectedSubStages = []">全部</el-button><el-checkbox-group v-model="selectedSubStages"><el-checkbox-button v-for="item in subStageFilters.filter(item => item !== '全部状态')" :key="item" :label="item">{{ item }}</el-checkbox-button></el-checkbox-group></div>
+              <div class="filter-line"><strong>优先级</strong><el-button size="small" :type="selectedPriorities.length ? 'default' : 'primary'" @click="selectedPriorities = []">全部</el-button><el-checkbox-group v-model="selectedPriorities"><el-checkbox-button v-for="item in ['P0', 'P1', 'P2', 'P3']" :key="item" :label="item">{{ item }}</el-checkbox-button></el-checkbox-group></div>
+              <div class="filter-line"><strong>标签</strong><el-button size="small" :type="selectedLabels.length ? 'default' : 'primary'" @click="selectedLabels = []">全部</el-button><el-checkbox-group v-model="selectedLabels"><el-checkbox-button v-for="item in labels.filter(item => item !== '全部标签')" :key="item" :label="item">{{ item }}</el-checkbox-button></el-checkbox-group></div>
+              <div class="filter-line"><strong>里程碑</strong><el-radio-group v-model="selectedMilestone"><el-radio-button v-for="item in milestones" :key="item" :label="item">{{ item }}</el-radio-button></el-radio-group></div>
+              <div class="filter-line"><strong>作者</strong><el-button size="small" :type="selectedAuthors.length ? 'default' : 'primary'" @click="selectedAuthors = []">全部</el-button><el-checkbox-group v-model="selectedAuthors"><el-checkbox-button v-for="item in authors.filter(item => item !== '全部作者')" :key="item" :label="item">{{ item }}</el-checkbox-button></el-checkbox-group></div>
+              <div class="filter-line"><strong>指派人</strong><el-button size="small" :type="selectedAssignees.length ? 'default' : 'primary'" @click="selectedAssignees = []">全部</el-button><el-checkbox-group v-model="selectedAssignees"><el-checkbox-button v-for="item in assignees.filter(item => item !== '全部指派人')" :key="item" :label="item">{{ item }}</el-checkbox-button></el-checkbox-group></div>
+              <div class="filter-line"><strong>类型</strong><el-radio-group v-model="selectedType"><el-radio-button v-for="item in types" :key="item" :label="item">{{ item }}</el-radio-button></el-radio-group></div>
+              <div class="filter-line"><strong>更新时间</strong><el-date-picker v-model="updatedRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" /></div>
+              <div class="filter-line"><strong>排序</strong><el-radio-group v-model="sortBy"><el-radio-button v-for="item in sorts" :key="item" :label="item">{{ item }}</el-radio-button></el-radio-group><el-button link type="primary" @click="resetFilters">重置筛选</el-button></div>
+            </div>
+            <div class="filter-row legacy-filter-row"><div class="state-tabs"><button v-for="state in states" :key="state" class="state-tab" :class="{ active: selectedState === state }" @click="selectedState = state">{{ state }} <span>{{ stateCount(state) }}</span></button></div><div class="quick-filters">
               <el-popover placement="bottom-start" :width="300" trigger="click"><template #reference><button class="filter-button">标签筛选 <span>⌄</span></button></template><div class="filter-popup"><el-input placeholder="搜索标签" size="small" /><button v-for="item in labels" :key="item" class="popup-option" :class="{ selected: selectedLabel === item }" @click="selectedLabel = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="260" trigger="click"><template #reference><button class="filter-button">里程碑筛选 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in milestones" :key="item" class="popup-option" :class="{ selected: selectedMilestone === item }" @click="selectedMilestone = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-start" :width="250" trigger="click"><template #reference><button class="filter-button">项目 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in projects" :key="item" class="popup-option" :class="{ selected: selectedProject === item }" @click="selectedProject = item">{{ item }}</button></div></el-popover>
