@@ -117,6 +117,10 @@ button, input, select { font: inherit; }
 .reset-filter-text { margin-left: auto; color: #326bd5; }
 .filter-line .el-date-editor { width: 280px; }
 .filter-row { display: flex; align-items: center; justify-content: flex-start; gap: 14px; min-width: 0; }
+.current-filter-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 28px; margin-top: 7px; color: #68748a; font-size: 12px; }
+.current-filter-label { color: #536078; font-weight: 600; }
+.current-filter-tag { margin: 0; }
+.current-filter-empty { color: #9aa4b5; }
 .state-tabs-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .filter-nav-reference { position: relative; }
 .filter-nav-reference .el-badge { margin-left: auto; }

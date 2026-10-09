@@ -109,7 +109,6 @@ const authors = computed(() => ['全部作者', ...Array.from(new Set(repository
 const assignees = computed(() => ['全部指派人', ...Array.from(new Set(repositoryIssues.value.map((item) => item.assignee))).filter(Boolean)])
 const activeFilterSummary = computed(() => {
   const items: string[] = []
-  if (selectedRepo.value) items.push(`仓库：${selectedRepo.value}`)
   if (selectedState.value !== '全部') items.push(`状态：${selectedState.value}`)
   if (searchTerm.value) items.push(`搜索：${searchTerm.value}`)
   if (selectedProject.value !== '全部项目') items.push(`项目：${selectedProject.value}`)
@@ -375,6 +374,21 @@ async function dropIssue(column: string) {
 }
 function toggleFilterValue(current: string[], value: string) { return current.includes(value) ? current.filter((item) => item !== value) : [...current, value] }
 function setStageFilter(stage: string) { selectedStage.value = stage; selectedSubStages.value = [] }
+function removeFilter(item: string) {
+  if (item.startsWith('状态：')) selectedState.value = '全部'
+  else if (item.startsWith('搜索：')) searchTerm.value = ''
+  else if (item.startsWith('项目：')) selectedProject.value = '全部项目'
+  else if (item.startsWith('阶段：')) { selectedStage.value = '全部阶段'; selectedSubStages.value = [] }
+  else if (item.startsWith('子状态：')) selectedSubStages.value = []
+  else if (item.startsWith('优先级：')) selectedPriorities.value = []
+  else if (item.startsWith('标签：')) selectedLabels.value = []
+  else if (item.startsWith('里程碑：')) selectedMilestone.value = '全部里程碑'
+  else if (item.startsWith('作者：')) selectedAuthors.value = []
+  else if (item.startsWith('指派人：')) selectedAssignees.value = []
+  else if (item.startsWith('类型：')) selectedType.value = '全部类型'
+  else if (item.startsWith('更新时间：')) updatedRange.value = []
+  else if (item.startsWith('排序：')) sortBy.value = sorts[0]
+}
 function resetFilters() { searchTerm.value = ''; selectedState.value = '全部'; selectedRepo.value = repos.value[0] ?? ''; selectedProject.value = '全部项目'; selectedStage.value = '全部阶段'; selectedSubStages.value = []; selectedPriorities.value = []; selectedLabels.value = []; selectedMilestone.value = '全部里程碑'; selectedAuthors.value = []; selectedAssignees.value = []; selectedType.value = '全部类型'; updatedRange.value = []; sortBy.value = sorts[0]; currentPage.value = 1 }
 function setBatchStage(code: string) { batchStageCode.value = code; batchSubStageCode.value = stageConfig.value.find((stage) => stage.code === code)?.substages[0]?.code ?? '' }
 function openBatchDialog() {
@@ -530,6 +544,7 @@ onMounted(initializePage)
               <el-popover placement="bottom-start" :width="220" trigger="click"><template #reference><button class="filter-button">排序 <span>⌄</span></button></template><div class="filter-popup"><button v-for="item in sorts" :key="item" class="popup-option" :class="{ selected: sortBy === item }" @click="sortBy = item">{{ item }}</button></div></el-popover>
               <el-popover placement="bottom-end" :width="360" trigger="click"><template #reference><button class="filter-button">更多筛选 <span>⌄</span></button></template><div class="filter-popup extra-filter"><div class="extra-title">更多筛选</div><el-date-picker v-model="updatedRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="更新时间起" end-placeholder="更新时间止" /><el-button link type="primary" @click="resetFilters"><el-icon><Refresh /></el-icon>重置筛选</el-button></div></el-popover>
             </div></div>
+            <div class="current-filter-row"><span class="current-filter-label">当前条件：</span><template v-if="activeFilterSummary.length"><el-tag v-for="item in activeFilterSummary" :key="item" class="current-filter-tag" size="small" closable @close="removeFilter(item)">{{ item }}</el-tag></template><span v-else class="current-filter-empty">暂无筛选条件</span></div>
             <div class="state-tabs-row"><div class="state-tabs"><button v-for="state in states" :key="state" class="state-tab" :class="{ active: selectedState === state }" @click="selectedState = state">{{ state }} <span>{{ stateCount(state) }}</span></button></div><div class="mode-switch filter-mode-switch" role="group" aria-label="切换展示模式"><button class="mode-button" :class="{ active: activeView === 'board' }" title="看板模式" @click="activeView = 'board'"><el-icon><Grid /></el-icon></button><button class="mode-button" :class="{ active: activeView === 'issues' }" title="列表模式" @click="activeView = 'issues'"><el-icon><Connection /></el-icon></button></div></div>
           </section>
           <div v-loading="loading" class="issue-content" :class="{ 'list-content': activeView === 'issues' }">
