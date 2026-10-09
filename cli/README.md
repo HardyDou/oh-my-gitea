@@ -6,6 +6,8 @@ CLI 使用当前用户自己的 Gitea Personal Access Token，不创建独立的
 
 ```bash
 npm install -g oh-my-gitea-cli
+# 如果使用 Pi Agent，可额外安装配套 Skill：
+# pi install npm:oh-my-gitea-cli
 export GITEA_PM_URL=http://localhost:3000
 export GITEA_TOKEN='你的 Gitea Token'
 

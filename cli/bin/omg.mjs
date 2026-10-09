@@ -2,6 +2,7 @@
 
 const usage = () => {
   console.error(`用法:
+  omg stages
   omg get OWNER REPO NUMBER
   omg management OWNER REPO NUMBER STAGE_CODE SUBSTAGE_CODE [PRIORITY]
   omg state OWNER REPO NUMBER open|closed
@@ -41,7 +42,13 @@ async function request(method, path, body) {
   console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2))
 }
 
-if (!command || args.length < 3) usage()
+if (!command) usage()
+if (command === 'stages') {
+  if (args.length !== 0) usage()
+  await request('GET', '/api/v1/config/stages')
+  process.exit(0)
+}
+if (args.length < 3) usage()
 const [owner, repo, number, ...rest] = args
 const issuePath = `/api/v1/repositories/${pathPart(owner)}/${pathPart(repo)}/issues/${pathPart(number)}`
 
