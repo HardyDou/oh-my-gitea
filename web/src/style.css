@@ -110,12 +110,12 @@ button, input, select { font: inherit; }
 .filter-panel { display: flex; flex-direction: column; gap: 10px; padding: 10px 0 2px; }
 .filter-line { display: flex; align-items: flex-start; gap: 10px; min-height: 32px; }
 .filter-line > strong { flex: 0 0 64px; padding-top: 7px; color: #536078; font-size: 13px; font-weight: 600; }
-.filter-line .el-radio-group, .filter-line .el-checkbox-group { display: flex; flex-wrap: wrap; gap: 6px; }
-.filter-line .el-radio-button__inner, .filter-line .el-checkbox-button__inner { padding: 6px 11px; border: 1px solid #dfe4ed; border-radius: 5px; box-shadow: none; color: #68748a; font-size: 12px; }
-.filter-line .el-radio-button:first-child .el-radio-button__inner, .filter-line .el-checkbox-button:first-child .el-checkbox-button__inner { border-left: 1px solid #dfe4ed; border-radius: 5px; }
-.filter-line .el-radio-button__original-radio:checked + .el-radio-button__inner, .filter-line .el-checkbox-button.is-checked .el-checkbox-button__inner { border-color: #4b7bec; background: #eef4ff; box-shadow: none; color: #326bd5; }
+.filter-line { flex-wrap: wrap; }
+.filter-text-option { padding: 6px 11px; border: 0; border-radius: 5px; background: transparent; color: #68748a; cursor: pointer; font-size: 12px; line-height: 1.4; }
+.filter-text-option:hover { background: #f1f4f8; color: #326bd5; }
+.filter-text-option.active { background: #eef4ff; color: #326bd5; font-weight: 600; }
+.reset-filter-text { margin-left: auto; color: #326bd5; }
 .filter-line .el-date-editor { width: 280px; }
-.filter-line .el-button { flex: 0 0 auto; margin-top: 0; }
 .filter-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
 .filter-nav-reference { position: relative; }
 .filter-nav-reference .el-badge { margin-left: auto; }
