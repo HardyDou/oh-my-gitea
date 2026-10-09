@@ -107,11 +107,11 @@ button, input, select { font: inherit; }
 .issue-title-link:hover { text-decoration: underline; }
 .batch-dialog-hint { margin: 0 0 18px; color: #68748a; font-size: 13px; line-height: 1.6; }
 .legacy-filter-row { display: none; }
-.filter-panel { display: flex; flex-direction: column; gap: 10px; padding: 10px 0 2px; }
-.filter-line { display: flex; align-items: flex-start; gap: 10px; min-height: 32px; }
-.filter-line > strong { flex: 0 0 64px; padding-top: 7px; color: #536078; font-size: 13px; font-weight: 600; }
+.filter-panel { display: flex; flex-direction: column; gap: 3px; padding: 5px 0 0; }
+.filter-line { display: flex; align-items: flex-start; gap: 7px; min-height: 27px; }
+.filter-line > strong { flex: 0 0 64px; padding-top: 4px; color: #536078; font-size: 13px; font-weight: 600; }
 .filter-line { flex-wrap: wrap; }
-.filter-text-option { padding: 6px 11px; border: 0; border-radius: 5px; background: transparent; color: #68748a; cursor: pointer; font-size: 12px; line-height: 1.4; }
+.filter-text-option { padding: 3px 9px; border: 0; border-radius: 5px; background: transparent; color: #68748a; cursor: pointer; font-size: 12px; line-height: 1.4; }
 .filter-text-option:hover { background: #f1f4f8; color: #326bd5; }
 .filter-text-option.active { background: #eef4ff; color: #326bd5; font-weight: 600; }
 .reset-filter-text { margin-left: auto; color: #326bd5; }
@@ -122,6 +122,7 @@ button, input, select { font: inherit; }
 .filter-summary-popover { display: flex; flex-direction: column; gap: 12px; }
 .filter-summary-title { color: #303b50; font-size: 13px; font-weight: 600; }
 .filter-summary-tags { display: flex; flex-wrap: wrap; gap: 6px; max-height: 180px; overflow-y: auto; }
+.legacy-state-tabs { display: none; }
 .state-tabs { display: flex; flex: 0 0 auto; border: 1px solid #dfe4ed; border-radius: 6px; overflow: hidden; }
 .state-tab { border: 0; border-right: 1px solid #dfe4ed; background: #fff; color: #68748a; padding: 8px 15px; cursor: pointer; font-size: 13px; }
 .state-tab:last-child { border-right: 0; }
