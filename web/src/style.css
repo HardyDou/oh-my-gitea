@@ -116,8 +116,8 @@ button, input, select { font: inherit; }
 .filter-text-option.active { background: #eef4ff; color: #326bd5; font-weight: 600; }
 .reset-filter-text { margin-left: auto; color: #326bd5; }
 .filter-line .el-date-editor { width: 280px; }
-.state-tabs-row { display: flex; align-items: center; margin-bottom: 8px; }
-.filter-row { display: flex; align-items: center; justify-content: flex-end; gap: 14px; min-width: 0; }
+.filter-row { display: flex; align-items: center; justify-content: flex-start; gap: 14px; min-width: 0; }
+.state-tabs-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .filter-nav-reference { position: relative; }
 .filter-nav-reference .el-badge { margin-left: auto; }
 .filter-summary-popover { display: flex; flex-direction: column; gap: 12px; }
