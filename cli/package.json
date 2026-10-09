@@ -1,0 +1,22 @@
+{
+  "name": "oh-my-gitea-cli",
+  "version": "0.1.0",
+  "description": "CLI for operating oh-my-gitea issues with a user's Gitea token",
+  "type": "module",
+  "bin": {
+    "omg": "./bin/omg.mjs"
+  },
+  "files": ["bin", "README.md"],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HardyDou/oh-my-gitea.git",
+    "directory": "cli"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

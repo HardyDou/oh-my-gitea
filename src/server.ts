@@ -235,6 +235,18 @@ app.patch<{ Params: { owner: string; repo: string; number: string }; Body: { ass
   return { assignee: updated.assignee?.login ?? '未分配' }
 })
 
+app.patch<{ Params: { owner: string; repo: string; number: string }; Body: { state?: 'open' | 'closed' } }>('/api/v1/repositories/:owner/:repo/issues/:number/state', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const context = await repositoryContext(auth.token, request.params.owner, request.params.repo, true)
+  const state = request.body?.state
+  if (state !== 'open' && state !== 'closed') return reply.code(400).send({ error: 'invalid_issue_state', message: 'state 必须是 open 或 closed' })
+  const issueNumber = Number(request.params.number)
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) return reply.code(400).send({ error: 'invalid_issue_number' })
+  const updated = await giteaRequest<GiteaIssue>(`/repos/${encodeURIComponent(request.params.owner)}/${encodeURIComponent(request.params.repo)}/issues/${issueNumber}`, auth.token, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state }) })
+  await query(`INSERT INTO audit_log (actor_gitea_user_id, actor_type, action, resource, payload) VALUES ($1, $2, $3, $4, $5)`, [auth.user.gitea_user_id, auth.actorType, 'update_issue_state', `${context.remote.full_name}#${issueNumber}`, JSON.stringify({ state })])
+  return { number: issueNumber, state: updated.state }
+})
+
 app.post<{ Body: { body?: string } }>('/api/v1/markdown', async (request, reply) => {
   const auth = await authenticate(request, reply); if (!auth) return
   return { html: await renderMarkdown(auth.token, request.body?.body ?? '') }
