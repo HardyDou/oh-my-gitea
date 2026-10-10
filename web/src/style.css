@@ -191,7 +191,7 @@ button, input, select { font: inherit; }
 .issue-detail-page { max-width: 1180px; margin: 0 auto; }
 .detail-top { display: flex; align-items: center; justify-content: space-between; height: 76px; margin-bottom: 24px; padding: 0 24px; background: #fff; border: 1px solid #e5e9f1; border-radius: 8px; color: #354158; }
 .detail-back { display: flex; align-items: center; gap: 14px; cursor: pointer; }
-.detail-back .el-button { width: 40px; height: 40px; border: 0; background: #f0f1f3; color: #59657a; }
+.detail-back .el-button { width: 32px; height: 32px; padding: 0; border: 0; background: #f0f1f3; color: #59657a; }
 .detail-back strong { font-size: 20px; font-weight: 600; }
 .detail-number { color: #7c8799; font-weight: 600; white-space: nowrap; }
 .detail-title-row { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
@@ -401,7 +401,21 @@ html[data-theme='dark'] .el-pagination button,
 html[data-theme='dark'] .el-pager li { background: #24292f; color: #9da5ae; }
 html[data-theme='dark'] .el-pager li.is-active { background: #1f6feb; color: #fff; }
 html[data-theme='dark'] .el-empty__description p { color: #9da5ae; }
-html[data-theme='dark'] .el-empty__image svg { color: #6e7681; }
+html[data-theme='dark'] .el-empty__image { opacity: .62; filter: grayscale(1) brightness(.72); }
+html[data-theme='dark'] .el-empty__image svg { color: #8b949e; }
+html[data-theme='dark'] .quick-stage { background: #1f3b5a; color: #79b8ff; }
+html[data-theme='dark'] .quick-priority { background: #1f3b5a; color: #79b8ff; }
+html[data-theme='dark'] .quick-substage,
+html[data-theme='dark'] .issue-substage { background: #1f3a2c; color: #7ee2a8; }
+html[data-theme='dark'] .priority-p0 { background: #43252a; color: #ff9b9b; }
+html[data-theme='dark'] .priority-p1 { background: #3d301d; color: #e8c477; }
+html[data-theme='dark'] .priority-p2 { background: #1f3b5a; color: #79b8ff; }
+html[data-theme='dark'] .priority-p3 { background: #2b3138; color: #aeb8c4; }
+html[data-theme='dark'] .markdown-toolbar { background: #24292f; border-color: #444c56; }
+html[data-theme='dark'] .markdown-toolbar button { color: #9da5ae; }
+html[data-theme='dark'] .markdown-toolbar button:hover { background: #30363d; color: #79b8ff; }
+html[data-theme='dark'] .detail-back .el-button { background: #30363d; color: #c9d1d9; }
+html[data-theme='dark'] .detail-back .el-button:hover { background: #3d444d; color: #fff; }
 html[data-theme='dark'] .el-drawer,
 html[data-theme='dark'] .el-drawer__header,
 html[data-theme='dark'] .el-drawer__body { background: #24292f; color: #c9d1d9; }
