@@ -38,11 +38,12 @@ async function authenticate(request: FastifyRequest, reply: FastifyReply): Promi
     try {
       token = decryptSecret(apiToken.gitea_access_token, config.sessionSecret)
       const giteaUser = await getUser(token)
-      if (giteaUser.id !== apiToken.gitea_user_id) throw new Error('api_token_user_mismatch')
+      if (String(giteaUser.id) !== String(apiToken.gitea_user_id)) throw new Error('api_token_user_mismatch')
       await touchApiAccessToken(apiToken.id)
       const user = await upsertUser(giteaUser)
       return { token, user, actorType: 'agent' }
-    } catch {
+    } catch (error) {
+      app.log.warn({ reason: error instanceof Error ? error.message : String(error) }, 'oh-my-gitea API token Gitea authorization failed')
       await reply.code(401).send({ error: 'unauthorized', message: 'oh-my-gitea API Token 对应的 Gitea 授权已失效' }); return null
     }
   }
