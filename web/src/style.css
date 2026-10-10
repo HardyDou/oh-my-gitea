@@ -250,6 +250,13 @@ button, input, select { font: inherit; }
 .detail-description { background: #f7f8fb; padding: 13px; border-radius: 6px; color: #59657a; font-size: 13px; line-height: 1.7; }
 .flow-item { font-size: 12px; color: #667187; }
 .el-drawer__header { margin-bottom: 0; }
+.api-token-button { color: #566176; }
+.api-token-button:hover { color: #2f65cc; }
+.api-token-hint { margin: 0 0 14px; color: #68748a; font-size: 13px; line-height: 1.6; }
+.api-token-create { display: flex; gap: 10px; margin-bottom: 16px; }
+.api-token-create .el-input { flex: 1; }
+.new-api-token { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 12px; border: 1px solid #b7d5ff; border-radius: 6px; background: #f0f6ff; color: #315d9c; font-size: 13px; }
+.new-api-token code { flex: 1; overflow-wrap: anywhere; color: #1f477f; }
 .theme-button { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 9px; border: 1px solid #e3e7ef; border-radius: 6px; background: transparent; color: #566176; cursor: pointer; font-size: 13px; }
 .theme-button:hover { background: #f1f4f8; color: #2f65cc; }
 .theme-dropdown .el-dropdown-menu__item { display: flex; align-items: center; gap: 8px; }
@@ -320,7 +327,11 @@ html[data-theme='dark'] .theme-button { border-color: #444a52; background: #2426
 html[data-theme='dark'] .state-tab { background: #242629; border-color: #444a52; color: #9da5ae; }
 html[data-theme='dark'] .state-tab.active { background: #30363d; color: #79b8ff; }
 html[data-theme='dark'] .mode-button { color: #9da5ae; }
-html[data-theme='dark'] .theme-button { color: #c0c6cd; }
+html[data-theme='dark'] .theme-button,
+html[data-theme='dark'] .api-token-button { color: #c0c6cd; }
+html[data-theme='dark'] .api-token-hint { color: #9da5ae; }
+html[data-theme='dark'] .new-api-token { border-color: #355f91; background: #202f43; color: #b9d7ff; }
+html[data-theme='dark'] .new-api-token code { color: #d0e4ff; }
 html[data-theme='dark'] .theme-button:hover,
 html[data-theme='dark'] .notification-button:hover,
 html[data-theme='dark'] .filter-button:hover { background: #30363d; color: #79b8ff; }

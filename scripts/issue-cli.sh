@@ -2,7 +2,7 @@
 set -euo pipefail
 
 : "${GITEA_PM_URL:=http://localhost:3000}"
-: "${GITEA_TOKEN:?请先设置 GITEA_TOKEN（你的 Gitea Personal Access Token）}"
+: "${OH_MY_GITEA_TOKEN:?请先设置 OH_MY_GITEA_TOKEN（oh-my-gitea API Token）}"
 
 usage() {
   cat <<'EOF'
@@ -29,12 +29,12 @@ request() {
   local method="$1" url="$2" body="${3:-}"
   if [[ -n "$body" ]]; then
     curl --fail-with-body -sS -X "$method" "$url" \
-      -H "Authorization: Bearer ${GITEA_TOKEN}" \
+      -H "Authorization: Bearer ${OH_MY_GITEA_TOKEN}" \
       -H 'Content-Type: application/json' \
       --data "$body"
   else
     curl --fail-with-body -sS -X "$method" "$url" \
-      -H "Authorization: Bearer ${GITEA_TOKEN}"
+      -H "Authorization: Bearer ${OH_MY_GITEA_TOKEN}"
   fi
   printf '\n'
 }

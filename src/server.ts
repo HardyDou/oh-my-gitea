@@ -3,9 +3,10 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import { config } from './config.js'
+import { decryptSecret, encryptSecret, hashSecret } from './secret.js'
 import { giteaConfigured, initializeGiteaSettings, publicGiteaSettings, saveGiteaSettings } from './settings.js'
 import { initializeAdministrator, registerAdministratorRoutes, requireAdministrator } from './admin.js'
-import { ensureStageConfiguration, getManagement, getStageConfiguration, query, upsertRepository, upsertUser, withTransaction } from './db.js'
+import { createApiAccessToken, ensureStageConfiguration, findApiAccessToken, getGiteaAccessToken, getManagement, getStageConfiguration, listApiAccessTokens, query, revokeApiAccessToken, saveGiteaAccessToken, touchApiAccessToken, upsertRepository, upsertUser, withTransaction } from './db.js'
 import { createComment, exchangeCode, getIssue, getRepository, getUser, giteaRequest, listComments, listIssues, listProjects, listRepositories, renderMarkdown, type GiteaIssue, type GiteaProject, type GiteaRepository } from './gitea.js'
 
 const app = Fastify({ logger: { redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-system-config-token"]'] } })
@@ -32,16 +33,26 @@ async function authenticate(request: FastifyRequest, reply: FastifyReply): Promi
   let token: string | undefined
   let actorType: 'user' | 'agent' = 'user'
   if (authorization?.startsWith('Bearer ')) {
-    token = authorization.slice(7)
-    actorType = 'agent'
-  } else {
-    const sid = sessionId(request)
-    if (sid) token = sessions.get(sid)?.token
+    const apiToken = await findApiAccessToken(hashSecret(authorization.slice(7)))
+    if (!apiToken?.gitea_access_token) { await reply.code(401).send({ error: 'unauthorized', message: 'oh-my-gitea API Token 无效或已撤销' }); return null }
+    try {
+      token = decryptSecret(apiToken.gitea_access_token, config.sessionSecret)
+      const giteaUser = await getUser(token)
+      if (giteaUser.id !== apiToken.gitea_user_id) throw new Error('api_token_user_mismatch')
+      await touchApiAccessToken(apiToken.id)
+      const user = await upsertUser(giteaUser)
+      return { token, user, actorType: 'agent' }
+    } catch {
+      await reply.code(401).send({ error: 'unauthorized', message: 'oh-my-gitea API Token 对应的 Gitea 授权已失效' }); return null
+    }
   }
+  const sid = sessionId(request)
+  if (sid) token = sessions.get(sid)?.token
   if (!token) { await reply.code(401).send({ error: 'unauthorized', message: '请先登录 Gitea' }); return null }
   try {
     const giteaUser = await getUser(token)
     const user = await upsertUser(giteaUser)
+    await saveGiteaAccessToken(user.id, encryptSecret(token, config.sessionSecret))
     return { token, user, actorType }
   } catch {
     await reply.code(401).send({ error: 'unauthorized', message: 'Gitea 会话已失效' }); return null
@@ -174,6 +185,7 @@ app.get<{ Querystring: { code?: string; state?: string; error?: string } }>('/au
   const token = await exchangeCode(request.query.code, oauth.verifier)
   if (revision !== configurationRevision) return reply.code(409).send({ message: '配置已更新，请重新登录' })
   const user = await upsertUser(await getUser(token))
+  await saveGiteaAccessToken(user.id, encryptSecret(token, config.sessionSecret))
   if (revision !== configurationRevision) return reply.code(409).send({ message: '配置已更新，请重新登录' })
   const sid = crypto.randomBytes(24).toString('hex')
   sessions.set(sid, { token, user })
@@ -189,6 +201,29 @@ app.post('/auth/logout', async (request, reply) => {
   const sid = sessionId(request)
   if (sid) sessions.delete(sid)
   return reply.clearCookie('pm_session', { path: '/' }).send({ ok: true })
+})
+
+app.get('/api/v1/auth/api-tokens', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  return { items: await listApiAccessTokens(auth.user.id) }
+})
+
+app.post<{ Body: { name?: string } }>('/api/v1/auth/api-tokens', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  if (auth.actorType !== 'user') return reply.code(403).send({ error: 'session_required', message: '请通过浏览器登录后创建 API Token' })
+  const name = request.body?.name?.trim().slice(0, 80)
+  if (!name) return reply.code(400).send({ error: 'token_name_required', message: '请输入 Token 名称' })
+  const token = `omg_${crypto.randomBytes(32).toString('base64url')}`
+  const saved = await createApiAccessToken(auth.user.id, name, hashSecret(token), token.slice(0, 12))
+  return reply.code(201).send({ ...saved, token, message: 'Token 只会显示这一次，请立即保存' })
+})
+
+app.delete<{ Params: { id: string } }>('/api/v1/auth/api-tokens/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const id = Number(request.params.id)
+  if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: 'invalid_token_id' })
+  await revokeApiAccessToken(auth.user.id, id)
+  return { ok: true }
 })
 
 app.get('/api/v1/repositories', async (request, reply) => {

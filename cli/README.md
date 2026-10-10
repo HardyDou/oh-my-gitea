@@ -2,14 +2,14 @@
 
 命令名：`omg`。
 
-CLI 使用当前用户自己的 Gitea Personal Access Token，不创建独立的应用 Token。
+CLI 使用当前用户自己的 oh-my-gitea API Token，由 oh-my-gitea 后端代为访问 Gitea。
 
 ```bash
 npm install -g oh-my-gitea-cli
 # 如果使用 Pi Agent，可额外安装配套 Skill：
 # pi install npm:oh-my-gitea-cli
 export GITEA_PM_URL=http://localhost:3000
-export GITEA_TOKEN='你的 Gitea Token'
+export OH_MY_GITEA_TOKEN='你的 oh-my-gitea API Token'
 
 omg get owner repo 1532
 omg management owner repo 1532 testing in_progress P1

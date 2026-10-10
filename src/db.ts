@@ -48,6 +48,8 @@ export async function upsertRepository(repo: { id: number; owner: string; name: 
 export type StageConfig = { id: number; code: string; name: string; sort_order: number; substages: Array<{ id: number; code: string; name: string; sort_order: number }> }
 
 export async function ensureStageConfiguration() {
+  await query(`ALTER TABLE app_user ADD COLUMN IF NOT EXISTS gitea_access_token TEXT`)
+  await query(`CREATE TABLE IF NOT EXISTS api_access_token (id BIGSERIAL PRIMARY KEY, app_user_id BIGINT NOT NULL REFERENCES app_user(id) ON DELETE CASCADE, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, token_prefix TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_used_at TIMESTAMPTZ, revoked_at TIMESTAMPTZ)`)
   await query(`CREATE TABLE IF NOT EXISTS stage_config (id BIGSERIAL PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL UNIQUE, sort_order INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
   await query(`CREATE TABLE IF NOT EXISTS stage_substage_config (id BIGSERIAL PRIMARY KEY, stage_id BIGINT NOT NULL REFERENCES stage_config(id) ON DELETE CASCADE, code TEXT NOT NULL, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, UNIQUE (stage_id, code))`)
   await query(`ALTER TABLE issue_management DROP CONSTRAINT IF EXISTS issue_management_stage_check`)
@@ -68,6 +70,34 @@ export async function ensureStageConfiguration() {
   await query(`INSERT INTO stage_substage_config (stage_id, code, name, sort_order) SELECT s.id, sub.code, sub.name, sub.sort_order FROM stage_config s CROSS JOIN (VALUES ('not_started', '未开始', 10), ('in_progress', '进行中', 20), ('completed', '完成', 30)) AS sub(code, name, sort_order) WHERE s.name IN ('需求', '研发', '测试', '归档') ON CONFLICT (stage_id, code) DO NOTHING`)
   await query(`UPDATE issue_management m SET sub_stage_code = s.code FROM stage_substage_config s WHERE m.stage_code = (SELECT sc.code FROM stage_config sc WHERE sc.id = s.stage_id) AND m.sub_stage = s.name AND m.sub_stage_code IS NULL`)
 }
+
+export async function saveGiteaAccessToken(appUserId: number, encryptedToken: string) {
+  await query('UPDATE app_user SET gitea_access_token = $1, updated_at = now() WHERE id = $2', [encryptedToken, appUserId])
+}
+
+export async function getGiteaAccessToken(appUserId: number) {
+  const result = await query<{ gitea_access_token: string | null }>('SELECT gitea_access_token FROM app_user WHERE id = $1', [appUserId])
+  return result.rows[0]?.gitea_access_token ?? null
+}
+
+export async function findApiAccessToken(tokenHash: string) {
+  const result = await query<{ id: number; app_user_id: number; gitea_access_token: string | null; gitea_user_id: number }>('SELECT t.id, t.app_user_id, u.gitea_access_token, u.gitea_user_id FROM api_access_token t JOIN app_user u ON u.id = t.app_user_id WHERE t.token_hash = $1 AND t.revoked_at IS NULL', [tokenHash])
+  return result.rows[0]
+}
+
+export async function touchApiAccessToken(id: number) { await query('UPDATE api_access_token SET last_used_at = now() WHERE id = $1', [id]) }
+
+export async function listApiAccessTokens(appUserId: number) {
+  const result = await query<{ id: number; name: string; token_prefix: string; created_at: string; last_used_at: string | null; revoked_at: string | null }>('SELECT id, name, token_prefix, created_at, last_used_at, revoked_at FROM api_access_token WHERE app_user_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC', [appUserId])
+  return result.rows
+}
+
+export async function createApiAccessToken(appUserId: number, name: string, tokenHash: string, tokenPrefix: string) {
+  const result = await query<{ id: number; name: string; token_prefix: string; created_at: string }>('INSERT INTO api_access_token (app_user_id, name, token_hash, token_prefix) VALUES ($1, $2, $3, $4) RETURNING id, name, token_prefix, created_at', [appUserId, name, tokenHash, tokenPrefix])
+  return result.rows[0]
+}
+
+export async function revokeApiAccessToken(appUserId: number, id: number) { await query('UPDATE api_access_token SET revoked_at = now() WHERE id = $1 AND app_user_id = $2', [id, appUserId]) }
 
 export async function getStageConfiguration() {
   const stages = await query<{ id: number; code: string; name: string; sort_order: number }>('SELECT id, code, name, sort_order FROM stage_config ORDER BY sort_order, id')

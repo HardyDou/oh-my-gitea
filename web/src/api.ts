@@ -44,8 +44,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>
 }
 
+export type ApiAccessToken = { id: number; name: string; token_prefix: string; created_at: string; last_used_at?: string | null; token?: string; message?: string }
+
 export function getMe() {
   return request<{ user: AppUser }>('/auth/me')
+}
+
+export function getApiAccessTokens() {
+  return request<{ items: ApiAccessToken[] }>('/api/v1/auth/api-tokens')
+}
+
+export function createApiAccessToken(name: string) {
+  return request<ApiAccessToken>('/api/v1/auth/api-tokens', { method: 'POST', body: JSON.stringify({ name }) })
+}
+
+export function revokeApiAccessToken(id: number) {
+  return request<{ ok: boolean }>(`/api/v1/auth/api-tokens/${id}`, { method: 'DELETE' })
 }
 
 export function getStageConfig() {

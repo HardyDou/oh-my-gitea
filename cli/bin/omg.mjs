@@ -13,15 +13,15 @@ const usage = () => {
 
 环境变量:
   GITEA_PM_URL    API 地址，默认 http://localhost:3000
-  GITEA_TOKEN     当前用户的 Gitea Personal Access Token`)
+  OH_MY_GITEA_TOKEN  oh-my-gitea API Token`)
   process.exit(2)
 }
 
 const [, , command, ...args] = process.argv
 const baseUrl = (process.env.GITEA_PM_URL || 'http://localhost:3000').replace(/\/$/, '')
-const token = process.env.GITEA_TOKEN
+const token = process.env.OH_MY_GITEA_TOKEN
 if (!token) {
-  console.error('请先设置 GITEA_TOKEN（你的 Gitea Personal Access Token）')
+  console.error('请先设置 OH_MY_GITEA_TOKEN（oh-my-gitea API Token）')
   process.exit(1)
 }
 

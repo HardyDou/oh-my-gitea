@@ -1,22 +1,22 @@
 # API 与 CLI
 
-API 使用调用者自己的 Gitea Token，不新增独立的应用授权体系，也不需要 Token 管理菜单。
+API 使用每个用户自己的 oh-my-gitea API Token。oh-my-gitea 后端根据 Token 对应的用户，使用该用户保存的 Gitea OAuth 授权访问 Gitea。
 
 ## 认证
 
 ```bash
 export GITEA_PM_URL=http://localhost:3000
-export GITEA_TOKEN='你的 Gitea Personal Access Token'
+export OH_MY_GITEA_TOKEN='你的 oh-my-gitea API Token'
 ```
 
 请求统一使用：
 
 ```http
-Authorization: Bearer <GITEA_TOKEN>
+Authorization: Bearer <OH_MY_GITEA_TOKEN>
 Content-Type: application/json
 ```
 
-Token 至少需要 `read:user`、`read:repository`、`read:issue`；修改 Issue 状态或评论还需要 `write:issue`。每个用户使用自己的 Gitea Token，权限由 Gitea 控制。
+API Token 在 Gitea PM 的用户菜单中创建，只显示一次。Gitea OAuth 授权需要 `read:user`、`read:repository`、`read:issue`；修改 Issue 状态或评论还需要 `write:issue`。
 
 ## Issue API
 
@@ -26,7 +26,7 @@ Token 至少需要 `read:user`、`read:repository`、`read:issue`；修改 Issue
 
 ```bash
 curl "$GITEA_PM_URL/api/v1/repositories/owner/repo/issues/1532/detail" \\
-  -H "Authorization: Bearer $GITEA_TOKEN"
+  -H "Authorization: Bearer $OH_MY_GITEA_TOKEN"
 ```
 
 ### 修改阶段、子阶段、优先级
@@ -35,7 +35,7 @@ curl "$GITEA_PM_URL/api/v1/repositories/owner/repo/issues/1532/detail" \\
 
 ```bash
 curl -X PATCH "$GITEA_PM_URL/api/v1/repositories/owner/repo/issues/1532/management" \\
-  -H "Authorization: Bearer $GITEA_TOKEN" \\
+  -H "Authorization: Bearer $OH_MY_GITEA_TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{"stageCode":"testing","subStageCode":"in_progress","priority":"P1"}'
 ```
@@ -46,7 +46,7 @@ curl -X PATCH "$GITEA_PM_URL/api/v1/repositories/owner/repo/issues/1532/manageme
 
 ```bash
 curl -X PATCH "$GITEA_PM_URL/api/v1/repositories/owner/repo/issues/1532/state" \\
-  -H "Authorization: Bearer $GITEA_TOKEN" \\
+  -H "Authorization: Bearer $OH_MY_GITEA_TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{"state":"closed"}'
 ```
@@ -57,7 +57,7 @@ curl -X PATCH "$GITEA_PM_URL/api/v1/repositories/owner/repo/issues/1532/state" \
 
 ```bash
 curl -X POST "$GITEA_PM_URL/api/v1/repositories/owner/repo/issues/1532/comments" \\
-  -H "Authorization: Bearer $GITEA_TOKEN" \\
+  -H "Authorization: Bearer $OH_MY_GITEA_TOKEN" \\
   -H 'Content-Type: application/json' \\
   -d '{"body":"处理完成，请验收。"}'
 ```
