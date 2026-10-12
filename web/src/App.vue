@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import GiteaSettings from './GiteaSettings.vue'
-import { ArrowLeft, Bell, Calendar, Connection, Grid, House, Monitor, Moon, Setting, Sunny, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { ArrowLeft, Bell, Box, Calendar, Connection, Grid, House, Monitor, Moon, Setting, Sunny, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
-import { addIssueComment, batchUpdateManagement, createApiAccessToken, getApiAccessTokens, getIssueDetail, getIssues, getMe, getRepositories, getStageConfig, renderMarkdown, revokeApiAccessToken, saveStageConfig, updateAssignee, updateIssueDueDate, updateManagement, uploadIssueAttachment, type ApiAccessToken, type AppUser, type GiteaComment, type GiteaIssue, type GiteaRepository, type StageConfig } from './api'
+import { addIssueComment, batchUpdateManagement, createApiAccessToken, createBuild, createDoc, createProduct, createPrototype, deleteDoc, deleteProduct, deletePrototype, getApiAccessTokens, getBuild, getDocDetail, getDocs, getIssueDetail, getIssues, getMe, getProducts, getPrototypes, getRepositories, getStageConfig, renderMarkdown, revokeApiAccessToken, saveStageConfig, updateAssignee, updateDoc, updateIssueDueDate, updateManagement, updateProduct, uploadIssueAttachment, type ApiAccessToken, type AppUser, type GiteaComment, type GiteaIssue, type GiteaRepository, type Product, type ProductDoc, type ProductDocSummary, type Prototype, type StageConfig } from './api'
 
 type Stage = string
 type Theme = 'light' | 'dark' | 'auto'
 type Priority = 'P0' | 'P1' | 'P2' | 'P3'
+type PrototypeBuild = import('./api').PrototypeBuild
 type Issue = {
   number: number; title: string; type: '需求' | '缺陷'; stage: Stage; stageCode: string; subStage: string; subStageCode: string; priority: Priority; dueDate: string | null; assets: Array<{ id: number; name: string; size?: number; browser_download_url?: string; download_url?: string }>
   repo: string; project: string; projects: string[]; labels: Array<{ name: string; color?: string }>; milestone: string
@@ -42,7 +43,7 @@ const searchTerm = ref(savedFilters.searchTerm ?? '')
 const selectedState = ref(savedFilters.state ?? '全部')
 const savedView = typeof window !== 'undefined' ? window.localStorage.getItem('gitea-pm-view') : null
 const preferredView = ref<'board' | 'issues'>(savedView === 'issues' ? 'issues' : 'board')
-const activeView = ref<'dashboard' | 'board' | 'issues' | 'settings'>(savedView === 'issues' ? 'issues' : savedView === 'dashboard' ? 'dashboard' : 'board')
+const activeView = ref<'dashboard' | 'board' | 'issues' | 'settings' | 'products'>(savedView === 'issues' ? 'issues' : savedView === 'dashboard' ? 'dashboard' : 'board')
 const savedTheme = typeof window !== 'undefined' ? window.localStorage.getItem('gitea-pm-theme') : null
 const theme = ref<Theme>(savedTheme === 'dark' || savedTheme === 'auto' ? savedTheme : 'light')
 function applyTheme() {
@@ -95,6 +96,29 @@ const apiTokenName = ref('')
 const apiTokens = ref<ApiAccessToken[]>([])
 const apiTokenLoading = ref(false)
 const newlyCreatedApiToken = ref('')
+
+const products = ref<Product[]>([])
+const selectedProduct = ref<Product | null>(null)
+const productLoading = ref(false)
+const productDialogVisible = ref(false)
+const productForm = ref({ name: '', description: '' })
+const productEditing = ref<Product | null>(null)
+const productTab = ref<'docs' | 'prototypes'>('docs')
+const productDocs = ref<ProductDocSummary[]>([])
+const currentDoc = ref<ProductDoc | null>(null)
+const docDraft = ref({ title: '', content: '' })
+const docSaving = ref(false)
+const docHtml = ref('')
+const docPreviewLoading = ref(false)
+const productPrototypes = ref<Prototype[]>([])
+const prototypeRepoInput = ref('')
+const buildTagInput = ref('')
+const buildStarting = ref(false)
+const prototypeViewingBuild = ref<PrototypeBuild | null>(null)
+let buildPollTimer: ReturnType<typeof setInterval> | null = null
+
+const prototypeBase = `${location.protocol}//${location.hostname}${location.port === '5173' ? ':3000' : `:${location.port}`}`
+const buildUrl = (prototype: Prototype, tag: string) => `${prototypeBase}/prototypes/${prototype.product_id}/${tag}/index.html`
 
 const stages = computed(() => stageConfig.value.map((stage) => stage.name))
 const boardColumns = computed(() => boardFocusStage.value ? stageConfig.value.find((stage) => stage.name === boardFocusStage.value)?.substages.map((substage) => substage.name) ?? [] : stages.value)
@@ -437,6 +461,142 @@ async function copyNewApiToken() {
   await navigator.clipboard.writeText(newlyCreatedApiToken.value)
   ElMessage.success('API Token 已复制')
 }
+async function openProducts() {
+  activeView.value = 'products'
+  productLoading.value = true
+  try { products.value = (await getProducts()).items } catch (error) { ElMessage.error((error as Error).message || '产品加载失败') } finally { productLoading.value = false }
+}
+function openProductDialog(product: Product | null) {
+  productEditing.value = product
+  productForm.value = { name: product?.name ?? '', description: product?.description ?? '' }
+  productDialogVisible.value = true
+}
+async function saveProductForm() {
+  const name = productForm.value.name.trim()
+  if (!name) { ElMessage.warning('请输入产品名称'); return }
+  try {
+    if (productEditing.value) await updateProduct(productEditing.value.id, name, productForm.value.description.trim())
+    else await createProduct(name, productForm.value.description.trim())
+    productDialogVisible.value = false
+    ElMessage.success('产品已保存')
+    await openProducts()
+    if (selectedProduct.value) await selectProduct(products.value.find((item) => item.id === selectedProduct.value?.id) ?? null)
+  } catch (error) { ElMessage.error((error as Error).message || '产品保存失败') }
+}
+async function removeProduct(product: Product) {
+  try {
+    await ElMessageBox.confirm(`确定删除产品「${product.name}」吗？文档和原型构建记录会一并删除。`, '删除产品', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    await deleteProduct(product.id)
+    ElMessage.success('产品已删除')
+    if (selectedProduct.value?.id === product.id) selectedProduct.value = null
+    await openProducts()
+  } catch (error) { if ((error as Error).message !== 'cancel') ElMessage.error((error as Error).message || '产品删除失败') }
+}
+async function selectProduct(product: Product | null) {
+  selectedProduct.value = product
+  productTab.value = 'docs'
+  currentDoc.value = null
+  stopBuildPolling()
+  if (!product) return
+  productLoading.value = true
+  try {
+    const [docs, prototypes] = await Promise.all([getDocs(product.id), getPrototypes(product.id)])
+    productDocs.value = docs.items
+    productPrototypes.value = prototypes.items
+  } catch (error) { ElMessage.error((error as Error).message || '产品数据加载失败') } finally { productLoading.value = false }
+}
+function newDoc() {
+  currentDoc.value = { id: 0, product_id: selectedProduct.value?.id ?? 0, title: '', content: '', created_at: '', updated_at: '' }
+  docDraft.value = { title: '', content: '' }
+  docHtml.value = ''
+}
+async function openDoc(summary: ProductDocSummary) {
+  try {
+    const doc = await getDocDetail(summary.id)
+    currentDoc.value = doc
+    docDraft.value = { title: doc.title, content: doc.content }
+    docHtml.value = ''
+  } catch (error) { ElMessage.error((error as Error).message || '文档加载失败') }
+}
+async function previewDoc() {
+  docPreviewLoading.value = true
+  try { docHtml.value = (await renderMarkdown(docDraft.value.content)).html } catch (error) { ElMessage.error((error as Error).message || '预览失败') } finally { docPreviewLoading.value = false }
+}
+async function saveCurrentDoc() {
+  const title = docDraft.value.title.trim()
+  if (!title) { ElMessage.warning('请输入文档标题'); return }
+  docSaving.value = true
+  try {
+    if (!currentDoc.value?.id) {
+      const saved = await createDoc(selectedProduct.value!.id, title, docDraft.value.content)
+      currentDoc.value = saved
+    } else {
+      currentDoc.value = await updateDoc(currentDoc.value.id, title, docDraft.value.content)
+    }
+    productDocs.value = (await getDocs(selectedProduct.value!.id)).items
+    ElMessage.success('文档已保存')
+  } catch (error) { ElMessage.error((error as Error).message || '文档保存失败') } finally { docSaving.value = false }
+}
+async function removeDoc(summary: ProductDocSummary) {
+  try {
+    await ElMessageBox.confirm(`确定删除文档「${summary.title}」吗？`, '删除文档', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    await deleteDoc(summary.id)
+    if (currentDoc.value?.id === summary.id) currentDoc.value = null
+    productDocs.value = (await getDocs(selectedProduct.value!.id)).items
+    ElMessage.success('文档已删除')
+  } catch (error) { if ((error as Error).message !== 'cancel') ElMessage.error((error as Error).message || '文档删除失败') }
+}
+async function addPrototype() {
+  const repository = prototypeRepoInput.value.trim()
+  if (!selectedProduct.value || !repository) { ElMessage.warning('请填写 Gitea 仓库地址'); return }
+  try {
+    await createPrototype(selectedProduct.value.id, repository)
+    prototypeRepoInput.value = ''
+    productPrototypes.value = (await getPrototypes(selectedProduct.value.id)).items
+    ElMessage.success('原型仓库已添加')
+  } catch (error) { ElMessage.error((error as Error).message || '原型添加失败') }
+}
+async function startBuild(prototype: Prototype) {
+  const tag = buildTagInput.value.trim()
+  if (!safeTagCheck(tag)) { ElMessage.warning('请输入有效的 tag，例如 v1.0.0'); return }
+  buildStarting.value = true
+  try {
+    await createBuild(prototype.id, tag)
+    buildTagInput.value = ''
+    ElMessage.success(`已开始构建 ${prototype.repository_full_name}@${tag}`)
+    productPrototypes.value = (await getPrototypes(selectedProduct.value!.id)).items
+    startBuildPolling()
+  } catch (error) { ElMessage.error((error as Error).message || '构建启动失败') } finally { buildStarting.value = false }
+}
+function safeTagCheck(tag: string) { return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tag) }
+async function refreshBuilds() {
+  if (!selectedProduct.value) return
+  const previous = productPrototypes.value
+  try { productPrototypes.value = (await getPrototypes(selectedProduct.value.id)).items } catch { productPrototypes.value = previous }
+  const active = prototypeViewingBuild.value
+  if (active) {
+    try { prototypeViewingBuild.value = await getBuild(active.id) } catch { /* 忽略轮询错误 */ }
+  }
+}
+function startBuildPolling() {
+  refreshBuilds()
+  if (!buildPollTimer) buildPollTimer = setInterval(refreshBuilds, 5000)
+}
+function stopBuildPolling() {
+  if (buildPollTimer) { clearInterval(buildPollTimer); buildPollTimer = null }
+  prototypeViewingBuild.value = null
+}
+async function viewBuildLog(build: PrototypeBuild) {
+  try { prototypeViewingBuild.value = await getBuild(build.id) } catch (error) { ElMessage.error((error as Error).message || '构建详情加载失败') }
+}
+async function removePrototype(prototype: Prototype) {
+  try {
+    await ElMessageBox.confirm(`确定移除原型仓库 ${prototype.repository_full_name} 吗？`, '移除原型', { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' })
+    await deletePrototype(prototype.id)
+    productPrototypes.value = (await getPrototypes(selectedProduct.value!.id)).items
+    ElMessage.success('原型仓库已移除')
+  } catch (error) { if ((error as Error).message !== 'cancel') ElMessage.error((error as Error).message || '原型移除失败') }
+}
 function setBatchStage(code: string) { batchStageCode.value = code; batchSubStageCode.value = stageConfig.value.find((stage) => stage.code === code)?.substages[0]?.code ?? '' }
 function openBatchDialog() {
   if (!selectedIssues.value.length) return
@@ -542,7 +702,7 @@ onMounted(initializePage)
 
 <template>
   <el-container class="app-shell">
-    <aside class="sidebar"><div class="brand"><span class="brand-mark">G</span><span>Gitea PM</span></div><nav class="nav"><div class="nav-title">工作台</div><div class="nav-item" :class="{ active: activeView === 'dashboard' }" @click="openDashboard"><el-icon><House /></el-icon><span>工作台首页</span></div><div class="nav-item" :class="{ active: activeView === 'board' || activeView === 'issues' }" @click="openProjectView"><el-icon><Grid /></el-icon><span>项目看板</span></div><div class="nav-title settings-nav-title">系统</div><div class="nav-item" :class="{ active: activeView === 'settings' }" @click="openStageSettings"><el-icon><Setting /></el-icon><span>系统配置</span></div></nav><div class="sidebar-foot">Gitea PM<br />v0.1.0</div></aside>
+    <aside class="sidebar"><div class="brand"><span class="brand-mark">G</span><span>Gitea PM</span></div><nav class="nav"><div class="nav-title">工作台</div><div class="nav-item" :class="{ active: activeView === 'dashboard' }" @click="openDashboard"><el-icon><House /></el-icon><span>工作台首页</span></div><div class="nav-item" :class="{ active: activeView === 'board' || activeView === 'issues' }" @click="openProjectView"><el-icon><Grid /></el-icon><span>项目看板</span></div><div class="nav-item" :class="{ active: activeView === 'products' }" @click="openProducts"><el-icon><Box /></el-icon><span>产品管理</span></div><div class="nav-title settings-nav-title">系统</div><div class="nav-item" :class="{ active: activeView === 'settings' }" @click="openStageSettings"><el-icon><Setting /></el-icon><span>系统配置</span></div></nav><div class="sidebar-foot">Gitea PM<br />v0.1.0</div></aside>
     <el-container class="main">
       <header class="topbar"><div class="topbar-left"><span class="page-title">{{ pageTitle }}</span><el-select v-if="repos.length" v-model="selectedRepo" class="repo-select" filterable placeholder="选择仓库" aria-label="选择仓库"><template #prefix>仓库</template><el-option v-for="repo in repos" :key="repo" :label="repo" :value="repo" /></el-select><el-tag type="info" effect="plain">Gitea 数据源</el-tag></div><div class="topbar-right"><el-button class="api-token-button" text @click="openApiTokenDialog">API 凭证</el-button><el-dropdown class="theme-dropdown" popper-class="theme-dropdown-popper" trigger="click" @command="setTheme"><button class="theme-button" type="button"><el-icon><Monitor v-if="theme === 'auto'" /><Moon v-else-if="theme === 'dark'" /><Sunny v-else /></el-icon><span>主题</span></button><template #dropdown><el-dropdown-menu><el-dropdown-item command="auto"><Monitor /> 自动（跟随系统）</el-dropdown-item><el-dropdown-item command="light"><Sunny /> 浅色</el-dropdown-item><el-dropdown-item command="dark"><Moon /> 深色</el-dropdown-item></el-dropdown-menu></template></el-dropdown><el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><button class="notification-button" title="通知"><el-icon><Bell /></el-icon><el-badge v-if="unreadNotifications.length" :value="unreadNotifications.length" :max="9" /></button></template><div class="notification-panel"><div class="notification-title">通知</div><div v-if="notifications.length === 0" class="muted">暂无新通知</div><button v-for="item in notifications" :key="item.key" class="notification-item" :class="{ unread: !readNotificationKeys.includes(item.key) }" @click="openNotification(item)"><strong>#{{ item.issue.number }} {{ item.issue.title }}</strong><span>{{ item.text }}</span></button></div></el-popover><div class="user"><el-avatar :size="30" :src="currentUser?.avatar_url ?? undefined" :icon="User" /><span>{{ currentUser?.display_name || currentUser?.login || '用户' }}</span></div></div></header>
       <main class="content">
@@ -567,6 +727,48 @@ onMounted(initializePage)
                 <aside class="detail-sidebar"><div class="sidebar-section"><h3>管理属性</h3><label>阶段</label><el-select v-model="selectedIssue.stage" style="width: 100%" @change="changeSelectedStage"><el-option v-for="stage in stages" :key="stage" :label="stage" :value="stage" /></el-select><label>子阶段</label><el-select v-model="selectedIssue.subStage" style="width: 100%" @change="changeSelectedSubstage"><el-option v-for="substage in selectedIssueSubstages" :key="substage.name" :label="substage.name" :value="substage.name" /></el-select><label>优先级</label><el-select v-model="selectedIssue.priority" style="width: 100%"><el-option v-for="priority in ['P0', 'P1', 'P2', 'P3']" :key="priority" :label="priority" :value="priority" /></el-select><label>截止日期</label><el-date-picker v-model="selectedIssue.dueDate" type="date" value-format="YYYY-MM-DD" placeholder="未设置" style="width: 100%" /><el-button type="primary" plain style="width: 100%; margin-top: 12px" @click="saveManagement">保存管理属性</el-button></div><div class="sidebar-section"><h3>Gitea 信息</h3><div class="sidebar-row"><span>项目</span><b>{{ selectedIssue.project }}</b></div><div class="sidebar-row"><span>里程碑</span><b>{{ selectedIssue.milestone }}</b></div><div class="sidebar-row"><span>作者</span><b>{{ selectedIssue.author }}</b></div><div class="sidebar-row"><span>指派人</span><b>{{ selectedIssue.assignee }}</b></div><div class="sidebar-row"><span>类型</span><b>{{ selectedIssue.type }}</b></div></div><div v-if="selectedIssue.assets.length" class="sidebar-section"><h3>附件（{{ selectedIssue.assets.length }}）</h3><a v-for="asset in selectedIssue.assets" :key="asset.id" class="attachment-link" :href="asset.browser_download_url || asset.download_url" target="_blank" rel="noreferrer">{{ asset.name }}</a></div><div class="sidebar-section"><h3>流转历史</h3><div v-for="item in detailHistory" :key="item.created_at + item.to_stage + item.to_sub_stage" class="history-row"><span class="history-time">{{ formatDate(item.created_at) }} · {{ item.actor_name || item.actor_login || '系统' }}</span><span class="history-event"><b v-if="item.to_stage && item.from_stage !== item.to_stage">阶段：{{ item.from_stage || '无' }} → {{ item.to_stage }}</b><b v-if="item.to_sub_stage && item.from_sub_stage !== item.to_sub_stage">状态：{{ item.from_sub_stage || '无' }} → {{ item.to_sub_stage }}</b><b v-if="item.to_priority && item.from_priority !== item.to_priority">优先级：{{ item.from_priority || '无' }} → {{ item.to_priority }}</b></span></div><span v-if="detailHistory.length === 0" class="muted">暂无流转记录</span></div></aside>
               </div>
             </div>
+          </template>
+          <template v-else-if="activeView === 'products'">
+            <section v-loading="productLoading" class="products-page">
+              <div v-if="!selectedProduct">
+                <div class="page-heading"><div><h1>产品管理</h1><p>登记产品基础信息、维护产品文档和原型版本。</p></div><el-button type="primary" @click="openProductDialog(null)"><el-icon><Plus /></el-icon>新建产品</el-button></div>
+                <div class="product-grid"><button v-for="product in products" :key="product.id" class="product-card" @click="selectProduct(product)"><strong>{{ product.name }}</strong><span>{{ product.description || '暂无描述' }}</span><small>更新于 {{ formatDate(product.updated_at) }}</small></button></div>
+                <el-empty v-if="!productLoading && products.length === 0" description="暂无产品，先新建一个" />
+              </div>
+              <template v-else>
+                <div class="page-heading"><div><el-button text @click="selectProduct(null)"><el-icon><ArrowLeft /></el-icon>返回产品列表</el-button><h1>{{ selectedProduct.name }}</h1><p>{{ selectedProduct.description || '暂无描述' }}</p></div><div><el-button plain @click="openProductDialog(selectedProduct)">编辑</el-button><el-button type="danger" plain @click="removeProduct(selectedProduct)">删除</el-button></div></div>
+                <el-radio-group v-model="productTab" style="margin-bottom: 18px"><el-radio-button value="docs">文档</el-radio-button><el-radio-button value="prototypes">原型</el-radio-button></el-radio-group>
+                <template v-if="productTab === 'docs'">
+                  <div class="doc-layout">
+                    <aside class="doc-list panel-box"><div class="panel-head"><strong>产品文档</strong><el-button size="small" text type="primary" @click="newDoc">＋新建</el-button></div><button v-for="doc in productDocs" :key="doc.id" class="doc-item" :class="{ active: currentDoc?.id === doc.id }" @click="openDoc(doc)"><strong>{{ doc.title }}</strong><span>{{ formatDate(doc.updated_at) }}</span></button><el-empty v-if="productDocs.length === 0 && !currentDoc" description="暂无文档" :image-size="50" /></aside>
+                    <section v-if="currentDoc" class="doc-editor panel-box">
+                      <div class="doc-editor-head"><el-input v-model="docDraft.title" placeholder="文档标题" class="doc-title-input" /><el-button plain @click="previewDoc" :loading="docPreviewLoading">预览</el-button><el-button type="primary" :loading="docSaving" @click="saveCurrentDoc">保存</el-button><el-button type="danger" plain @click="removeDoc(currentDoc)">删除</el-button></div>
+                      <div class="doc-editor-body">
+                        <textarea v-model="docDraft.content" class="doc-markdown-text" placeholder="使用 Markdown 编写产品文档…" />
+                        <div v-if="docHtml" class="doc-markdown-preview markdown-body rendered-markdown" v-html="docHtml"></div>
+                      </div>
+                    </section>
+                    <el-empty v-else description="选择左侧文档进行编辑" :image-size="60" />
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="panel-box prototype-add"><el-input v-model="prototypeRepoInput" placeholder="Gitea 仓库地址或 owner/repo" style="max-width: 360px" /><el-button type="primary" plain @click="addPrototype">添加原型仓库</el-button></div>
+                  <section v-for="prototype in productPrototypes" :key="prototype.id" class="panel-box prototype-card">
+                    <div class="prototype-head"><strong>{{ prototype.repository_full_name }}</strong><el-button link type="danger" @click="removePrototype(prototype)">移除</el-button></div>
+                    <div class="prototype-build-bar"><el-input v-model="buildTagInput" placeholder="Tag，例如 v1.0.0" style="max-width: 220px" @keyup.enter="startBuild(prototype)" /><el-button type="primary" :loading="buildStarting" @click="startBuild(prototype)">构建该版本</el-button></div>
+                    <div v-for="build in prototype.builds" :key="build.id" class="build-row">
+                      <el-tag size="small" effect="plain">{{ build.tag }}</el-tag>
+                      <el-tag size="small" :type="build.status === 'success' ? 'success' : build.status === 'failed' ? 'danger' : 'warning'">{{ { pending: '排队中', building: '构建中', success: '已构建', failed: '构建失败' }[build.status] }}</el-tag>
+                      <span class="muted">{{ formatDate(build.created_at) }}</span>
+                      <a v-if="build.status === 'success'" class="build-link" :href="buildUrl(prototype, build.tag)" target="_blank" rel="noreferrer">打开原型 ↗</a>
+                      <el-button link type="primary" @click="viewBuildLog(build)">日志</el-button>
+                    </div>
+                    <div v-if="prototype.builds.length === 0" class="muted">还没有构建记录，输入 Tag 后点击构建。</div>
+                  </section>
+                  <el-empty v-if="productPrototypes.length === 0" description="尚未添加原型仓库" />
+                </template>
+              </template>
+            </section>
           </template>
           <template v-else-if="activeView === 'settings'">
             <el-radio-group v-model="settingsSection" style="margin-bottom: 20px"><el-radio-button value="gitea">Gitea 集成</el-radio-button><el-radio-button value="stages">阶段管理</el-radio-button></el-radio-group>
@@ -603,6 +805,12 @@ onMounted(initializePage)
               <el-form-item label="状态"><el-select v-model="batchSubStageCode" style="width: 100%"><el-option v-for="substage in batchSubstages" :key="substage.code" :label="substage.name" :value="substage.code" /></el-select></el-form-item>
             </el-form>
             <template #footer><el-button @click="batchDialogVisible = false">取消</el-button><el-button type="primary" :loading="batchSaving" @click="saveBatchManagement">确认修改</el-button></template>
+          </el-dialog>
+          <el-dialog :model-value="Boolean(prototypeViewingBuild)" @update:model-value="(value: boolean | string | number) => { if (!value) prototypeViewingBuild = null }" :title="prototypeViewingBuild ? `构建日志 · ${prototypeViewingBuild.tag}` : ''" width="720px" destroy-on-close @closed="prototypeViewingBuild = null">
+            <template v-if="prototypeViewingBuild">
+              <div class="build-log-head"><el-tag size="small" :type="prototypeViewingBuild.status === 'success' ? 'success' : prototypeViewingBuild.status === 'failed' ? 'danger' : 'warning'">{{ { pending: '排队中', building: '构建中', success: '已构建', failed: '构建失败' }[prototypeViewingBuild.status] }}</el-tag><span v-if="prototypeViewingBuild.finished_at" class="muted">{{ formatDate(prototypeViewingBuild.finished_at) }}</span></div>
+              <pre class="build-log-text">{{ prototypeViewingBuild.log || '暂无日志' }}</pre>
+            </template>
           </el-dialog>
           <el-dialog v-model="apiTokenDialogVisible" title="API 访问凭证" width="620px" destroy-on-close @closed="newlyCreatedApiToken = ''">
             <p class="api-token-hint">CLI 使用此 oh-my-gitea Token 访问项目管理 API，后端会使用当前用户的 Gitea OAuth 授权访问 Gitea。凭证只在创建时显示一次。</p>

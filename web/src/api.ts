@@ -113,3 +113,52 @@ export function updateIssueDueDate(repository: GiteaRepository, number: number, 
 export function updateAssignee(repository: GiteaRepository, number: number, assignee: string | null) {
   return request<{ assignee: string }>(`/api/v1/repositories/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/issues/${number}/assignee`, { method: 'PATCH', body: JSON.stringify({ assignee }) })
 }
+
+export type Product = { id: number; name: string; description: string | null; created_at: string; updated_at: string }
+export type ProductDocSummary = { id: number; title: string; created_at: string; updated_at: string }
+export type ProductDoc = ProductDocSummary & { product_id: number; content: string }
+export type PrototypeBuild = { id: number; tag: string; status: 'pending' | 'building' | 'success' | 'failed'; log: string | null; created_at: string; finished_at: string | null }
+export type Prototype = { id: number; product_id: number; repository_full_name: string; created_at: string; builds: PrototypeBuild[] }
+
+export function getProducts() {
+  return request<{ items: Product[] }>('/api/v1/products')
+}
+export function createProduct(name: string, description: string) {
+  return request<Product>('/api/v1/products', { method: 'POST', body: JSON.stringify({ name, description }) })
+}
+export function updateProduct(id: number, name: string, description: string) {
+  return request<Product>(`/api/v1/products/${id}`, { method: 'PUT', body: JSON.stringify({ name, description }) })
+}
+export function deleteProduct(id: number) {
+  return request<{ ok: boolean }>(`/api/v1/products/${id}`, { method: 'DELETE' })
+}
+export function getDocs(productId: number) {
+  return request<{ items: ProductDocSummary[] }>(`/api/v1/products/${productId}/docs`)
+}
+export function getDocDetail(id: number) {
+  return request<ProductDoc>(`/api/v1/docs/${id}`)
+}
+export function createDoc(productId: number, title: string, content: string) {
+  return request<ProductDoc>('/api/v1/docs', { method: 'POST', body: JSON.stringify({ productId, title, content }) })
+}
+export function updateDoc(id: number, title: string, content: string) {
+  return request<ProductDoc>(`/api/v1/docs/${id}`, { method: 'PUT', body: JSON.stringify({ title, content }) })
+}
+export function deleteDoc(id: number) {
+  return request<{ ok: boolean }>(`/api/v1/docs/${id}`, { method: 'DELETE' })
+}
+export function getPrototypes(productId: number) {
+  return request<{ items: Prototype[] }>(`/api/v1/products/${productId}/prototypes`)
+}
+export function createPrototype(productId: number, repository: string) {
+  return request<Prototype>('/api/v1/prototypes', { method: 'POST', body: JSON.stringify({ productId, repository }) })
+}
+export function deletePrototype(id: number) {
+  return request<{ ok: boolean }>(`/api/v1/prototypes/${id}`, { method: 'DELETE' })
+}
+export function createBuild(prototypeId: number, tag: string) {
+  return request<PrototypeBuild>(`/api/v1/prototypes/${prototypeId}/builds`, { method: 'POST', body: JSON.stringify({ tag }) })
+}
+export function getBuild(id: number) {
+  return request<PrototypeBuild>(`/api/v1/builds/${id}`)
+}

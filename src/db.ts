@@ -113,3 +113,49 @@ export async function getManagement(repositoryId: number, issueNumbers: number[]
   )
   return new Map(result.rows.map((row) => [row.issue_number, { stage: row.stage, stage_code: row.stage_code, sub_stage: row.sub_stage, sub_stage_code: row.sub_stage_code, priority: row.priority }]))
 }
+
+export type ProductRow = { id: number; name: string; description: string | null; created_by: number | null; created_at: string; updated_at: string }
+export type ProductDocRow = { id: number; product_id: number; title: string; content: string; created_by: number | null; created_at: string; updated_at: string }
+export type PrototypeRow = { id: number; product_id: number; repository_full_name: string; created_by: number | null; created_at: string }
+export type PrototypeBuildRow = { id: number; prototype_id: number; tag: string; status: 'pending' | 'building' | 'success' | 'failed'; log: string | null; built_by: number | null; created_at: string; finished_at: string | null }
+
+export async function listProducts() { return (await query<ProductRow>('SELECT * FROM product ORDER BY updated_at DESC')).rows }
+export async function createProduct(name: string, description: string, createdBy: number) {
+  const result = await query<ProductRow>('INSERT INTO product (name, description, created_by) VALUES ($1, $2, $3) RETURNING *', [name, description, createdBy])
+  return result.rows[0]
+}
+export async function updateProduct(id: number, name: string, description: string) {
+  const result = await query<ProductRow>('UPDATE product SET name = $2, description = $3, updated_at = now() WHERE id = $1 RETURNING *', [id, name, description])
+  return result.rows[0]
+}
+export async function deleteProduct(id: number) { await query('DELETE FROM product WHERE id = $1', [id]) }
+
+export async function listDocs(productId: number) { return (await query<Pick<ProductDocRow, 'id' | 'title' | 'created_at' | 'updated_at'>>('SELECT id, title, created_at, updated_at FROM product_doc WHERE product_id = $1 ORDER BY updated_at DESC', [productId])).rows }
+export async function getDoc(id: number) { return (await query<ProductDocRow>('SELECT * FROM product_doc WHERE id = $1', [id])).rows[0] }
+export async function createDoc(productId: number, title: string, content: string, createdBy: number) {
+  const result = await query<ProductDocRow>('INSERT INTO product_doc (product_id, title, content, created_by) VALUES ($1, $2, $3, $4) RETURNING *', [productId, title, content, createdBy])
+  return result.rows[0]
+}
+export async function updateDoc(id: number, title: string, content: string) {
+  const result = await query<ProductDocRow>('UPDATE product_doc SET title = $2, content = $3, updated_at = now() WHERE id = $1 RETURNING *', [id, title, content])
+  return result.rows[0]
+}
+export async function deleteDoc(id: number) { await query('DELETE FROM product_doc WHERE id = $1', [id]) }
+
+export async function listPrototypes(productId: number) { return (await query<PrototypeRow>('SELECT * FROM prototype WHERE product_id = $1 ORDER BY created_at DESC', [productId])).rows }
+export async function createPrototype(productId: number, repo: string, createdBy: number) {
+  const result = await query<PrototypeRow>('INSERT INTO prototype (product_id, repository_full_name, created_by) VALUES ($1, $2, $3) RETURNING *', [productId, repo, createdBy])
+  return result.rows[0]
+}
+export async function deletePrototype(id: number) { await query('DELETE FROM prototype WHERE id = $1', [id]) }
+
+export async function listBuilds(prototypeId: number) { return (await query<PrototypeBuildRow>('SELECT * FROM prototype_build WHERE prototype_id = $1 ORDER BY created_at DESC', [prototypeId])).rows }
+export async function createBuild(prototypeId: number, tag: string, builtBy: number) {
+  const result = await query<PrototypeBuildRow>("INSERT INTO prototype_build (prototype_id, tag, status, built_by) VALUES ($1, $2, 'pending', $3) RETURNING *", [prototypeId, tag, builtBy])
+  return result.rows[0]
+}
+export async function updateBuildStatus(id: number, status: PrototypeBuildRow['status'], log: string) {
+  await query(`UPDATE prototype_build SET status = $2, log = $3, finished_at = CASE WHEN $2 IN ('success', 'failed') THEN now() ELSE finished_at END WHERE id = $1`, [id, status, log])
+}
+export async function getBuild(id: number) { return (await query<PrototypeBuildRow>('SELECT * FROM prototype_build WHERE id = $1', [id])).rows[0] }
+export async function updateBuildLog(id: number, log: string) { await query('UPDATE prototype_build SET log = $2 WHERE id = $1', [id, log]) }

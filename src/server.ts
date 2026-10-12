@@ -1,12 +1,16 @@
 import crypto from 'node:crypto'
+import { spawn } from 'node:child_process'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
+import fastifyStatic from '@fastify/static'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import { config } from './config.js'
 import { decryptSecret, encryptSecret, hashSecret } from './secret.js'
 import { giteaConfigured, initializeGiteaSettings, publicGiteaSettings, saveGiteaSettings } from './settings.js'
 import { initializeAdministrator, registerAdministratorRoutes, requireAdministrator } from './admin.js'
-import { createApiAccessToken, ensureStageConfiguration, findApiAccessToken, getGiteaAccessToken, getManagement, getStageConfiguration, listApiAccessTokens, query, revokeApiAccessToken, saveGiteaAccessToken, touchApiAccessToken, upsertRepository, upsertUser, withTransaction } from './db.js'
+import { createApiAccessToken, createBuild, createDoc, createProduct, createPrototype, deleteDoc, deleteProduct, deletePrototype, ensureStageConfiguration, findApiAccessToken, getBuild, getDoc, getGiteaAccessToken, getManagement, getStageConfiguration, listApiAccessTokens, listBuilds, listDocs, listProducts, listPrototypes, query, revokeApiAccessToken, saveGiteaAccessToken, touchApiAccessToken, updateBuildStatus, updateBuildLog, updateDoc, updateProduct, upsertRepository, upsertUser, withTransaction } from './db.js'
 import { createComment, exchangeCode, getIssue, getRepository, getUser, giteaRequest, listComments, listIssues, listProjects, listRepositories, renderMarkdown, type GiteaIssue, type GiteaProject, type GiteaRepository } from './gitea.js'
 
 const app = Fastify({ logger: { redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-system-config-token"]'] } })
@@ -26,6 +30,9 @@ function sessionId(request: FastifyRequest) {
 await app.register(cookie, { secret: config.sessionSecret })
 await app.register(cors, { origin: config.corsOrigin, credentials: true })
 await app.register((await import('@fastify/multipart')).default, { limits: { fileSize: 20 * 1024 * 1024 } })
+const prototypeRoot = path.resolve('.data/prototypes')
+await mkdir(prototypeRoot, { recursive: true })
+await app.register(fastifyStatic, { root: prototypeRoot, prefix: '/prototypes/', decorateReply: true, index: ['index.html'] })
 registerAdministratorRoutes(app)
 
 async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<AuthContext | null> {
@@ -281,6 +288,168 @@ app.patch<{ Params: { owner: string; repo: string; number: string }; Body: { sta
   const updated = await giteaRequest<GiteaIssue>(`/repos/${encodeURIComponent(request.params.owner)}/${encodeURIComponent(request.params.repo)}/issues/${issueNumber}`, auth.token, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state }) })
   await query(`INSERT INTO audit_log (actor_gitea_user_id, actor_type, action, resource, payload) VALUES ($1, $2, $3, $4, $5)`, [auth.user.gitea_user_id, auth.actorType, 'update_issue_state', `${context.remote.full_name}#${issueNumber}`, JSON.stringify({ state })])
   return { number: issueNumber, state: updated.state }
+})
+
+const safeTag = (tag: string) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tag)
+
+function runCommand(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = {}) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
+    child.stdout.on('data', (chunk) => { logBuffer = (logBuffer + chunk.toString()).slice(-8000) })
+    child.stderr.on('data', (chunk) => { logBuffer = (logBuffer + chunk.toString()).slice(-8000) })
+    child.on('error', reject)
+    child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`${command} 退出码 ${code}`)))
+  })
+}
+let logBuffer = ''
+
+async function runPrototypeBuild(buildId: number, prototypeId: number, repoFullName: string, tag: string, giteaToken: string) {
+  const workDir = path.join('/tmp', `omg-build-${buildId}-${Date.now()}`)
+  try {
+    await updateBuildStatus(buildId, 'building', '开始构建')
+    logBuffer = ''
+    const [owner, repo] = repoFullName.split('/')
+    const cloneUrl = new URL(`${config.giteaBaseUrl}/${owner}/${repo}.git`)
+    cloneUrl.username = 'pm'
+    cloneUrl.password = giteaToken
+    await mkdir(workDir, { recursive: true })
+    await runCommand('git', ['clone', '--depth', '1', '--branch', tag, cloneUrl.toString(), '.'], workDir)
+    await updateBuildLog(buildId, logBuffer)
+    await rm(path.join(workDir, '.git'), { recursive: true, force: true })
+    await runCommand('npm', ['install', '--no-audit', '--no-fund'], workDir)
+    await updateBuildLog(buildId, logBuffer)
+    await runCommand('npm', ['run', 'build'], workDir)
+    await updateBuildLog(buildId, logBuffer)
+    let distDir: string | undefined
+    for (const candidate of ['dist', 'build', 'out']) {
+      try { const target = await stat(path.join(workDir, candidate)); if (target.isDirectory()) { distDir = path.join(workDir, candidate); break } } catch { /* 尝试下一个目录 */ }
+    }
+    if (!distDir) throw new Error('构建产物目录不存在（尝试了 dist/build/out）')
+    const targetDir = path.join(prototypeRoot, String(prototypeId), tag)
+    await rm(targetDir, { recursive: true, force: true })
+    await mkdir(path.dirname(targetDir), { recursive: true })
+    await runCommand('cp', ['-a', `${distDir}/.`, targetDir], workDir)
+    await rm(workDir, { recursive: true, force: true })
+    await updateBuildStatus(buildId, 'success', logBuffer)
+  } catch (error) {
+    await updateBuildStatus(buildId, 'failed', `${logBuffer}\n构建失败：${error instanceof Error ? error.message : String(error)}`.slice(-8000))
+    await rm(workDir, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+app.get('/api/v1/products', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  return { items: await listProducts() }
+})
+
+app.post<{ Body: { name?: string; description?: string } }>('/api/v1/products', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const name = request.body?.name?.trim()
+  if (!name) return reply.code(400).send({ error: 'product_name_required', message: '请输入产品名称' })
+  try {
+    const product = await createProduct(name, request.body?.description?.trim() ?? '', auth.user.id)
+    await query(`INSERT INTO audit_log (actor_gitea_user_id, actor_type, action, resource, payload) VALUES ($1, $2, $3, $4, $5)`, [auth.user.gitea_user_id, auth.actorType, 'create_product', `product/${product.id}`, JSON.stringify({ name })])
+    return reply.code(201).send(product)
+  } catch (error) {
+    const message = String((error as Error).message)
+    if (message.includes('unique')) return reply.code(409).send({ error: 'product_exists', message: '产品名称已存在' })
+    throw error
+  }
+})
+
+app.put<{ Params: { id: string }; Body: { name?: string; description?: string } }>('/api/v1/products/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const name = request.body?.name?.trim()
+  if (!name) return reply.code(400).send({ error: 'product_name_required', message: '请输入产品名称' })
+  const product = await updateProduct(Number(request.params.id), name, request.body?.description?.trim() ?? '')
+  if (!product) return reply.code(404).send({ error: 'product_not_found' })
+  return product
+})
+
+app.delete<{ Params: { id: string } }>('/api/v1/products/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  await deleteProduct(Number(request.params.id))
+  await query(`INSERT INTO audit_log (actor_gitea_user_id, actor_type, action, resource, payload) VALUES ($1, $2, $3, $4, $5)`, [auth.user.gitea_user_id, auth.actorType, 'delete_product', `product/${request.params.id}`, '{}'])
+  return { ok: true }
+})
+
+app.get<{ Params: { id: string } }>('/api/v1/products/:id/docs', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  return { items: await listDocs(Number(request.params.id)) }
+})
+
+app.get<{ Params: { id: string } }>('/api/v1/docs/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const doc = await getDoc(Number(request.params.id))
+  if (!doc) return reply.code(404).send({ error: 'doc_not_found' })
+  return doc
+})
+
+app.post<{ Body: { productId?: number; title?: string; content?: string } }>('/api/v1/docs', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const productId = Number(request.body?.productId)
+  const title = request.body?.title?.trim()
+  if (!Number.isInteger(productId) || !title) return reply.code(400).send({ error: 'doc_invalid', message: '产品和文档标题必填' })
+  return reply.code(201).send(await createDoc(productId, title, request.body?.content ?? '', auth.user.id))
+})
+
+app.put<{ Params: { id: string }; Body: { title?: string; content?: string } }>('/api/v1/docs/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const title = request.body?.title?.trim()
+  if (!title) return reply.code(400).send({ error: 'doc_title_required', message: '请输入文档标题' })
+  return await updateDoc(Number(request.params.id), title, request.body?.content ?? '')
+})
+
+app.delete<{ Params: { id: string } }>('/api/v1/docs/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  await deleteDoc(Number(request.params.id))
+  return { ok: true }
+})
+
+app.get<{ Params: { id: string } }>('/api/v1/products/:id/prototypes', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const productId = Number(request.params.id)
+  const prototypes = await listPrototypes(productId)
+  const items = await Promise.all(prototypes.map(async (prototype) => ({ ...prototype, builds: await listBuilds(prototype.id) })))
+  return { items }
+})
+
+app.post<{ Body: { productId?: number; repository?: string } }>('/api/v1/prototypes', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const productId = Number(request.body?.productId)
+  const raw = (request.body?.repository ?? '').trim()
+  if (!Number.isInteger(productId) || !raw) return reply.code(400).send({ error: 'prototype_invalid', message: '产品和仓库地址必填' })
+  const fullName = raw.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '').replace(/\.(html|md)$/, '')
+  if (!/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) return reply.code(400).send({ error: 'prototype_repo_invalid', message: '仓库地址无效，请填写 owner/repo 或完整 Gitea URL' })
+  const remote = await getRepository(auth.token, fullName.split('/')[0], fullName.split('/')[1]).catch(() => null)
+  if (!remote) return reply.code(400).send({ error: 'prototype_repo_not_found', message: 'Gitea 仓库不存在或无权访问' })
+  return reply.code(201).send(await createPrototype(productId, fullName, auth.user.id))
+})
+
+app.delete<{ Params: { id: string } }>('/api/v1/prototypes/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  await deletePrototype(Number(request.params.id))
+  return { ok: true }
+})
+
+app.post<{ Params: { id: string }; Body: { tag?: string } }>('/api/v1/prototypes/:id/builds', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const tag = request.body?.tag?.trim()
+  if (!safeTag(tag ?? '')) return reply.code(400).send({ error: 'invalid_tag', message: 'Tag 只能包含字母、数字、点、短横线和下划线' })
+  const build = await createBuild(Number(request.params.id), tag as string, auth.user.id)
+  const prototype = (await query<{ repository_full_name: string }>('SELECT repository_full_name FROM prototype WHERE id = $1', [Number(request.params.id)])).rows[0]
+  if (!prototype) return reply.code(404).send({ error: 'prototype_not_found' })
+  const giteaToken = await getGiteaAccessToken(auth.user.id)
+  if (!giteaToken) return reply.code(400).send({ error: 'gitea_token_missing', message: '请先在浏览器重新登录以保存 Gitea 授权' })
+  void runPrototypeBuild(build.id, Number(request.params.id), prototype.repository_full_name, tag as string, decryptSecret(giteaToken, config.sessionSecret))
+  return reply.code(201).send(build)
+})
+
+app.get<{ Params: { id: string } }>('/api/v1/builds/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const build = await getBuild(Number(request.params.id))
+  if (!build) return reply.code(404).send({ error: 'build_not_found' })
+  return build
 })
 
 app.post<{ Body: { body?: string } }>('/api/v1/markdown', async (request, reply) => {
