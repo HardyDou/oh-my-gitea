@@ -112,8 +112,11 @@ const docHtml = ref('')
 const docPreviewLoading = ref(false)
 const productPrototypes = ref<Prototype[]>([])
 const prototypeRepoInput = ref('')
-const buildTagInput = ref('')
+const buildTagDrafts = ref<Record<number, string>>({})
 const buildStarting = ref(false)
+const productSearchTerm = ref('')
+const productFiltered = computed(() => { const term = productSearchTerm.value.trim(); if (!term) return products.value; return products.value.filter((product) => product.name.includes(term) || (product.description ?? '').includes(term)) })
+const docDirty = computed(() => { if (!currentDoc.value) return false; if (!currentDoc.value.id) return Boolean(docDraft.value.title.trim() || docDraft.value.content); return docDraft.value.title !== currentDoc.value.title || docDraft.value.content !== currentDoc.value.content })
 const prototypeViewingBuild = ref<PrototypeBuild | null>(null)
 let buildPollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -480,7 +483,7 @@ async function saveProductForm() {
     productDialogVisible.value = false
     ElMessage.success('产品已保存')
     await openProducts()
-    if (selectedProduct.value) await selectProduct(products.value.find((item) => item.id === selectedProduct.value?.id) ?? null)
+    if (selectedProduct.value) selectedProduct.value = products.value.find((item) => item.id === selectedProduct.value?.id) ?? selectedProduct.value
   } catch (error) { ElMessage.error((error as Error).message || '产品保存失败') }
 }
 async function removeProduct(product: Product) {
@@ -488,14 +491,16 @@ async function removeProduct(product: Product) {
     await ElMessageBox.confirm(`确定删除产品「${product.name}」吗？文档和原型构建记录会一并删除。`, '删除产品', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     await deleteProduct(product.id)
     ElMessage.success('产品已删除')
-    if (selectedProduct.value?.id === product.id) selectedProduct.value = null
+    if (selectedProduct.value?.id === product.id) { selectedProduct.value = null; currentDoc.value = null; prototypeViewingBuild.value = null; stopBuildPolling() }
     await openProducts()
   } catch (error) { if ((error as Error).message !== 'cancel') ElMessage.error((error as Error).message || '产品删除失败') }
 }
 async function selectProduct(product: Product | null) {
+  if (selectedProduct.value?.id !== product?.id && !(await confirmLeaveDoc())) return
   selectedProduct.value = product
   productTab.value = 'docs'
   currentDoc.value = null
+  prototypeViewingBuild.value = null
   stopBuildPolling()
   if (!product) return
   productLoading.value = true
@@ -503,6 +508,7 @@ async function selectProduct(product: Product | null) {
     const [docs, prototypes] = await Promise.all([getDocs(product.id), getPrototypes(product.id)])
     productDocs.value = docs.items
     productPrototypes.value = prototypes.items
+    if (prototypes.items.some((item) => item.builds.some((build) => build.status === 'pending' || build.status === 'building'))) startBuildPolling()
   } catch (error) { ElMessage.error((error as Error).message || '产品数据加载失败') } finally { productLoading.value = false }
 }
 function newDoc() {
@@ -510,7 +516,12 @@ function newDoc() {
   docDraft.value = { title: '', content: '' }
   docHtml.value = ''
 }
+async function confirmLeaveDoc() {
+  if (!docDirty.value) return true
+  try { await ElMessageBox.confirm('当前文档有未保存的修改，离开将丢失。确定离开吗？', '未保存的修改', { type: 'warning', confirmButtonText: '离开', cancelButtonText: '留在这里' }); return true } catch { return false }
+}
 async function openDoc(summary: ProductDocSummary) {
+  if (!(await confirmLeaveDoc())) return
   try {
     const doc = await getDocDetail(summary.id)
     currentDoc.value = doc
@@ -519,6 +530,7 @@ async function openDoc(summary: ProductDocSummary) {
   } catch (error) { ElMessage.error((error as Error).message || '文档加载失败') }
 }
 async function previewDoc() {
+  if (docHtml.value) { docHtml.value = ''; return }
   docPreviewLoading.value = true
   try { docHtml.value = (await renderMarkdown(docDraft.value.content)).html } catch (error) { ElMessage.error((error as Error).message || '预览失败') } finally { docPreviewLoading.value = false }
 }
@@ -557,14 +569,15 @@ async function addPrototype() {
   } catch (error) { ElMessage.error((error as Error).message || '原型添加失败') }
 }
 async function startBuild(prototype: Prototype) {
-  const tag = buildTagInput.value.trim()
+  const tag = (buildTagDrafts.value[prototype.id] ?? '').trim()
   if (!safeTagCheck(tag)) { ElMessage.warning('请输入有效的 tag，例如 v1.0.0'); return }
   buildStarting.value = true
   try {
-    await createBuild(prototype.id, tag)
-    buildTagInput.value = ''
+    const build = await createBuild(prototype.id, tag)
+    delete buildTagDrafts.value[prototype.id]
     ElMessage.success(`已开始构建 ${prototype.repository_full_name}@${tag}`)
     productPrototypes.value = (await getPrototypes(selectedProduct.value!.id)).items
+    prototypeViewingBuild.value = build
     startBuildPolling()
   } catch (error) { ElMessage.error((error as Error).message || '构建启动失败') } finally { buildStarting.value = false }
 }
@@ -582,17 +595,22 @@ async function refreshBuilds() {
   if (active) {
     try { prototypeViewingBuild.value = await getBuild(active.id) } catch { /* 忽略轮询错误 */ }
   }
+  const hasActiveBuild = productPrototypes.value.some((prototype) => prototype.builds.some((build) => build.status === 'pending' || build.status === 'building'))
+  if (!hasActiveBuild) stopBuildPolling()
 }
 function startBuildPolling() {
-  refreshBuilds()
   if (!buildPollTimer) buildPollTimer = setInterval(refreshBuilds, 5000)
+  void refreshBuilds()
 }
 function stopBuildPolling() {
   if (buildPollTimer) { clearInterval(buildPollTimer); buildPollTimer = null }
-  prototypeViewingBuild.value = null
 }
 async function viewBuildLog(build: PrototypeBuild) {
-  try { prototypeViewingBuild.value = await getBuild(build.id) } catch (error) { ElMessage.error((error as Error).message || '构建详情加载失败') }
+  try {
+    const detail = await getBuild(build.id)
+    prototypeViewingBuild.value = detail
+    if (detail.status === 'pending' || detail.status === 'building') startBuildPolling()
+  } catch (error) { ElMessage.error((error as Error).message || '构建详情加载失败') }
 }
 async function removePrototype(prototype: Prototype) {
   try {
@@ -737,8 +755,10 @@ onMounted(initializePage)
             <section v-loading="productLoading" class="products-page">
               <template v-if="!selectedProduct">
                 <div class="page-heading"><div><h1>产品管理</h1><p>登记产品基础信息、维护产品文档和原型版本。</p></div><el-button type="primary" @click="openProductDialog(null)"><el-icon><Plus /></el-icon>新建产品</el-button></div>
-                <div class="product-grid"><button v-for="product in products" :key="product.id" class="product-card" @click="selectProduct(product)"><span class="product-mark" :style="productMarkStyle(product)">{{ product.name.slice(0, 1) }}</span><strong>{{ product.name }}</strong><span class="product-card-desc">{{ product.description || '暂无描述' }}</span><small>更新于 {{ formatDate(product.updated_at) }}</small></button></div>
+                <div class="product-toolbar"><el-input v-model="productSearchTerm" class="product-search" placeholder="搜索产品名称或描述" clearable /></div>
+                <div class="product-grid"><button v-for="product in productFiltered" :key="product.id" class="product-card" @click="selectProduct(product)"><span class="product-mark" :style="productMarkStyle(product)">{{ product.name.slice(0, 1) }}</span><strong>{{ product.name }}</strong><span class="product-card-desc">{{ product.description || '暂无描述' }}</span><small>更新于 {{ formatDate(product.updated_at) }}</small></button></div>
                 <el-empty v-if="!productLoading && products.length === 0" description="暂无产品，先新建一个" />
+                <div v-else-if="!productLoading && productFiltered.length === 0" class="muted" style="padding: 30px 0; text-align: center;">没有匹配的产品，换个关键词试试。</div>
               </template>
               <template v-else>
                 <div class="products-crumb"><button class="crumb-link" @click="selectProduct(null)">产品管理</button><span>/</span><strong>{{ selectedProduct.name }}</strong></div>
@@ -749,8 +769,8 @@ onMounted(initializePage)
                       <div class="doc-layout">
                         <aside class="doc-list panel-box"><div class="panel-head"><strong>产品文档</strong><el-button size="small" text type="primary" @click="newDoc">＋新建</el-button></div><button v-for="doc in productDocs" :key="doc.id" class="doc-item" :class="{ active: currentDoc?.id === doc.id }" @click="openDoc(doc)"><strong>{{ doc.title }}</strong><span>{{ formatDate(doc.updated_at) }}</span></button><el-empty v-if="productDocs.length === 0 && !currentDoc" description="暂无文档" :image-size="50" /></aside>
                         <section v-if="currentDoc" class="doc-editor panel-box">
-                          <div class="doc-editor-head"><el-input v-model="docDraft.title" placeholder="文档标题" class="doc-title-input" /><el-button plain @click="previewDoc" :loading="docPreviewLoading">预览</el-button><el-button type="primary" :loading="docSaving" @click="saveCurrentDoc">保存</el-button><el-button type="danger" plain @click="removeDoc(currentDoc)">删除</el-button></div>
-                          <div class="doc-editor-body">
+                          <div class="doc-editor-head"><el-input v-model="docDraft.title" placeholder="文档标题" class="doc-title-input" /><span v-if="docDirty" class="dirty-hint">● 未保存</span><el-button plain @click="previewDoc" :loading="docPreviewLoading">{{ docHtml ? '收起预览' : '预览' }}</el-button><el-button type="primary" :disabled="!docDirty" :loading="docSaving" @click="saveCurrentDoc">保存</el-button><el-button type="danger" plain @click="removeDoc(currentDoc)">删除</el-button></div>
+                          <div class="doc-editor-body" :class="{ split: docHtml }">
                             <textarea v-model="docDraft.content" class="doc-markdown-text" placeholder="使用 Markdown 编写产品文档…" />
                             <div v-if="docHtml" class="doc-markdown-preview markdown-body rendered-markdown" v-html="docHtml"></div>
                           </div>
@@ -762,9 +782,9 @@ onMounted(initializePage)
                       <div class="panel-box prototype-add"><el-input v-model="prototypeRepoInput" placeholder="Gitea 仓库地址或 owner/repo" style="max-width: 360px" /><el-button type="primary" plain @click="addPrototype">添加原型仓库</el-button></div>
                       <section v-for="prototype in productPrototypes" :key="prototype.id" class="panel-box prototype-card">
                         <div class="prototype-head"><span class="repo-mark"><el-icon><Box /></el-icon></span><strong>{{ prototype.repository_full_name }}</strong><el-button link type="danger" @click="removePrototype(prototype)">移除</el-button></div>
-                        <div class="prototype-build-bar"><el-input v-model="buildTagInput" placeholder="Tag，例如 v1.0.0" style="max-width: 220px" @keyup.enter="startBuild(prototype)" /><el-button type="primary" :loading="buildStarting" @click="startBuild(prototype)">按 Tag 构建</el-button></div>
+                        <div class="prototype-build-bar"><el-input v-model="buildTagDrafts[prototype.id]" :placeholder="`Tag，例如 v${prototype.builds.length + 1}.0.0`" style="max-width: 220px" @keyup.enter="startBuild(prototype)" /><el-button type="primary" :loading="buildStarting" @click="startBuild(prototype)">按 Tag 构建</el-button></div>
                         <div v-if="prototype.builds.length" class="version-chips">
-                          <span v-for="build in prototype.builds" :key="build.id" class="version-chip" @click="viewBuildLog(build)"><i class="version-dot" :style="{ background: statusColor(build.status) }" /><strong>{{ build.tag }}</strong><em>{{ statusText(build.status) }}</em><a v-if="build.status === 'success'" class="chip-open" :href="buildUrl(prototype, build.tag)" target="_blank" rel="noreferrer" @click.stop>↗</a></span>
+                          <span v-for="build in prototype.builds" :key="build.id" class="version-chip" @click="viewBuildLog(build)"><i class="version-dot" :style="{ background: statusColor(build.status) }" /><strong>{{ build.tag }}</strong><em>{{ statusText(build.status) }} · {{ build.created_at.slice(11, 16) }}</em><a v-if="build.status === 'success'" class="chip-open" :href="buildUrl(prototype, build.tag)" target="_blank" rel="noreferrer" @click.stop>↗</a></span>
                         </div>
                         <div v-else class="muted">还没有构建记录，输入 Tag 后点击构建。</div>
                       </section>

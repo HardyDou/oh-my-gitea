@@ -253,6 +253,9 @@ button, input, select { font: inherit; }
 .products-page { width: 100%; }
 .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .product-card { display: flex; flex-direction: column; gap: 9px; align-items: flex-start; padding: 18px; border: 1px solid #e5e9f1; border-radius: 10px; background: #fff; color: #354158; text-align: left; cursor: pointer; transition: all .15s; }
+.product-toolbar { display: flex; margin-bottom: 14px; }
+.product-search { max-width: 320px; }
+.dirty-hint { color: #e79629; font-size: 12px; white-space: nowrap; }
 .product-card:hover { border-color: #9bb3f6; box-shadow: 0 4px 12px rgb(40 75 145 / 8%); transform: translateY(-1px); }
 .product-card strong { font-size: 15px; }
 .product-card small { color: #9aa4b3; font-size: 11px; }
@@ -270,7 +273,7 @@ button, input, select { font: inherit; }
 .version-chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border: 1px solid #e5e9f1; border-radius: 999px; background: #fff; color: #354158; cursor: pointer; font-size: 12px; transition: all .12s; }
 .version-chip:hover { border-color: #9bb3f6; background: #fafbff; }
 .version-chip strong { font-weight: 600; }
-.version-chip em { font-style: normal; color: #8a95a7; font-size: 11px; }
+.version-chip em { font-style: normal; color: #8a95a7; font-size: 11px; white-space: nowrap; }
 .version-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
 .chip-open { color: #3971d3; text-decoration: none; font-weight: 700; }
 .repo-mark { width: 28px; height: 28px; border-radius: 6px; background: #eef4ff; color: #3971d3; display: grid; place-items: center; font-size: 14px; }
@@ -286,6 +289,7 @@ button, input, select { font: inherit; }
 .doc-editor-head { display: flex; gap: 10px; margin-bottom: 12px; }
 .doc-title-input { flex: 1; }
 .doc-editor-body { display: grid; flex: 1; min-height: 420px; grid-template-columns: minmax(0, 1fr); }
+.doc-editor-body.split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .doc-markdown-text { display: block; width: 100%; min-height: 420px; resize: vertical; border: 1px solid #dfe4ed; border-radius: 8px; padding: 12px; outline: none; color: #354158; font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; background: #fafbfc; }
 .doc-markdown-preview { border: 1px solid #dfe4ed; border-radius: 8px; padding: 14px; background: #fafbfc; min-height: 420px; }
 .prototype-add { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
