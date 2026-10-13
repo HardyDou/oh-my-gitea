@@ -777,7 +777,7 @@ onMounted(initializePage)
                     <template v-if="productTab === 'docs'">
                       <div v-if="!currentDoc" class="panel-box doc-list-panel">
                         <div class="panel-head"><strong>文档（{{ productDocs.length }}）</strong><el-button size="small" text type="primary" @click="newDoc">＋新建</el-button></div>
-                        <button v-for="doc in productDocs" :key="doc.id" class="doc-row" @click="openDoc(doc)"><strong>{{ doc.title }}</strong><span class="doc-row-time">更新于 {{ formatDate(doc.updated_at) }}</span><el-button link type="danger" @click.stop="removeDoc(doc)">删除</el-button></button>
+                        <div class="doc-list-rows"><div v-for="doc in productDocs" :key="doc.id" class="doc-row" @click="openDoc(doc)"><strong class="doc-row-title">{{ doc.title }}</strong><span class="doc-row-time">更新于 {{ formatDate(doc.updated_at) }}</span><span class="doc-row-action" @click.stop><el-button link type="danger" @click="removeDoc(doc)">删除</el-button></span></div></div>
                         <el-empty v-if="productDocs.length === 0" description="暂无文档，点击右上角新建" :image-size="50" />
                       </div>
                       <section v-else class="doc-editor panel-box">
