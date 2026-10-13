@@ -353,10 +353,6 @@ async function runPrototypeBuild(buildId: number, prototypeId: number, repoFullN
   }
 }
 
-app.get('/api/v1/products', async (request, reply) => {
-  const auth = await authenticate(request, reply); if (!auth) return
-  return { items: await listProducts() }
-})
 
 app.post<{ Body: { name?: string; description?: string } }>('/api/v1/products', async (request, reply) => {
   const auth = await authenticate(request, reply); if (!auth) return
@@ -504,6 +500,23 @@ app.get<{ Params: { id: string } }>('/api/v1/products/:id', async (request, repl
   return { features: features, releases: releases }
 })
 
+app.get('/api/v1/products', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const rows = await listProducts()
+  const [featureCounts, docsCounts, protoCounts, ongoingRelease] = await Promise.all([
+    query<{ product_id: number; count: number }>('SELECT product_id, count(*)::int AS count FROM product_feature GROUP BY product_id'),
+    query<{ product_id: number; count: number }>('SELECT product_id, count(*)::int AS count FROM product_doc GROUP BY product_id'),
+    query<{ product_id: number; count: number }>('SELECT product_id, count(*)::int AS count FROM prototype GROUP BY product_id'),
+    query<{ product_id: number; name: string }>(`SELECT DISTINCT ON (product_id) product_id, name FROM product_release WHERE status = 'ongoing' ORDER BY product_id, target_date ASC NULLS LAST`),
+  ])
+  const featureMap = new Map(featureCounts.rows.map(row => [row.product_id, Number(row.count)]))
+  const docsMap = new Map(docsCounts.rows.map(row => [row.product_id, Number(row.count)]))
+  const protoMap = new Map(protoCounts.rows.map(row => [row.product_id, Number(row.count)]))
+  const ongoingMap = new Map(ongoingRelease.rows.map(row => [row.product_id, row.name]))
+  return { items: rows.map(row => ({ ...row, counts: { features: featureMap.get(row.id) ?? 0, docs: docsMap.get(row.id) ?? 0, prototypes: protoMap.get(row.id) ?? 0, ongoingRelease: ongoingMap.get(row.id) ?? null } })) }
+})
+
+// 保留无统计的原始列表路由（增加段后出现，保持行为一致）
 app.get<{ Params: { id: string } }>('/api/v1/products/:id/overview', async (request, reply) => {
   const auth = await authenticate(request, reply); if (!auth) return
   const productId = Number(request.params.id)
@@ -642,6 +655,23 @@ app.delete<{ Params: { id: string } }>('/api/v1/releases/:id', async (request, r
   await deleteRelease(existing.id)
   await writeAuthLog(auth, 'delete_release', `product/${existing.product_id}/release/${existing.id}`, { name: existing.name })
   return { ok: true }
+})
+
+app.get<{ Querystring: { q?: string } }>('/api/v1/search', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const keyword = String(request.query.q ?? '').trim()
+  if (!keyword) return { products: [], features: [], issues: [] }
+  const like = `%${keyword}%`
+  const [products, features] = await Promise.all([
+    query<{ id: number; name: string; description: string | null }>('SELECT id, name, description FROM product WHERE name ILIKE $1 OR COALESCE(description, \'\') ILIKE $1 ORDER BY updated_at DESC LIMIT 5', [like]),
+    query<{ id: number; product_id: number; title: string; status: string }>(`SELECT f.id, f.product_id, f.title, f.status FROM product_feature f JOIN product p ON p.id = f.product_id WHERE f.title ILIKE $1 ORDER BY f.updated_at DESC LIMIT 6`, [like]),
+  ])
+  let issues = [] as Array<{ owner: string; repo: string; number: number; title: string; state: string; html_url: string | null }>
+  try {
+    const results = await giteaRequest<Array<{ number: number; title: string; state: string; html_url?: string; repository?: { full_name?: string; owner?: { login?: string }; name?: string } }>>(`/repos/issues/search?q=${encodeURIComponent(keyword)}&type=issues&limit=6`, auth.token)
+    issues = results.map(item => ({ owner: item.repository?.owner?.login ?? item.repository?.full_name?.split('/')[0] ?? '', repo: item.repository?.name ?? item.repository?.full_name?.split('/')[1] ?? '', number: item.number, title: item.title, state: item.state, html_url: item.html_url ?? `https://${new URL(config.giteaBaseUrl).host}/${item.repository?.full_name ?? ''}/issues/${item.number}` })).filter(item => item.owner && item.repo)
+  } catch { /* Issue 搜索不可用时忽略 */ }
+  return { products: products.rows, features: features.rows, issues }
 })
 
 app.get<{ Querystring: { q?: string } }>('/api/v1/issue-search', async (request, reply) => {

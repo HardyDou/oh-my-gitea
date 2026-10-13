@@ -114,7 +114,7 @@ export function updateAssignee(repository: GiteaRepository, number: number, assi
   return request<{ assignee: string }>(`/api/v1/repositories/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/issues/${number}/assignee`, { method: 'PATCH', body: JSON.stringify({ assignee }) })
 }
 
-export type Product = { id: number; name: string; description: string | null; created_at: string; updated_at: string }
+export type Product = { id: number; name: string; description: string | null; created_at: string; updated_at: string; counts?: { features: number; docs: number; prototypes: number; ongoingRelease: string | null } }
 export type ProductDocSummary = { id: number; title: string; created_at: string; updated_at: string }
 export type ProductDoc = ProductDocSummary & { product_id: number; content: string }
 export type PrototypeBuild = { id: number; tag: string; status: 'pending' | 'building' | 'success' | 'failed'; log: string | null; created_at: string; finished_at: string | null }
@@ -208,6 +208,17 @@ export function deleteRelease(id: number) {
 }
 export function getProductOverview(productId: number) {
   return request<ProductOverview>(`/api/v1/products/${productId}/overview`)
+}
+export type QuickSearchResult = {
+  products: Array<{ id: number; name: string; description: string | null }>
+  features: Array<{ id: number; product_id: number; title: string; status: FeatureStatus; priority: string }>
+  issues: Array<{ owner: string; repo: string; number: number; title: string; state: string; html_url: string | null }>
+}
+export function getFeatureDetail(id: number) {
+  return request<ProductFeature>(`/api/v1/features/${id}`)
+}
+export function searchAll(q: string) {
+  return request<QuickSearchResult>(`/api/v1/search?q=${encodeURIComponent(q)}`)
 }
 export function searchIssues(q: string) {
   return request<{ items: Array<{ owner: string; repo: string; number: number; title: string; state: string }> }>(`/api/v1/issue-search?q=${encodeURIComponent(q)}`)

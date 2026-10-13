@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import GiteaSettings from './GiteaSettings.vue'
 import { ArrowLeft, Bell, Box, Calendar, Connection, Grid, House, Monitor, Moon, Setting, Sunny, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
-import { addIssueComment, batchUpdateManagement, createApiAccessToken, createBuild, createDoc, createFeature, createProduct, createPrototype, createRelease, deleteDoc, deleteFeature, deleteProduct, deletePrototype, deleteRelease, getApiAccessTokens, getBuild, getDocDetail, getDocs, getProduct, getIssueDetail, getIssues, getMe, getProductOverview, getProducts, getPrototypes, getRepositories, getReleases, getStageConfig, renderMarkdown, revokeApiAccessToken, saveStageConfig, searchIssues, setReleaseStatus, updateAssignee, updateDoc, updateFeature, updateIssueDueDate, updateManagement, updateProduct, updateRelease, uploadIssueAttachment, type ApiAccessToken, type AppUser, type FeatureStatus, type FeaturePayload, type GiteaComment, type GiteaIssue, type GiteaRepository, type LinkedFeatureIssue, type Product, type ProductDoc, type ProductDocSummary, type ProductFeature, type ProductOverview, type ProductRelease, type Prototype, type ReleaseStatus, type StageConfig } from './api'
+import { addIssueComment, batchUpdateManagement, getFeatureDetail, searchAll, createApiAccessToken, createBuild, createDoc, createFeature, createProduct, createPrototype, createRelease, deleteDoc, deleteFeature, deleteProduct, deletePrototype, deleteRelease, getApiAccessTokens, getBuild, getDocDetail, getDocs, getProduct, getIssueDetail, getIssues, getMe, getProductOverview, getProducts, getPrototypes, getRepositories, getReleases, getStageConfig, renderMarkdown, revokeApiAccessToken, saveStageConfig, searchIssues, setReleaseStatus, updateAssignee, updateDoc, updateFeature, updateIssueDueDate, updateManagement, updateProduct, updateRelease, uploadIssueAttachment, type ApiAccessToken, type AppUser, type FeatureStatus, type FeaturePayload, type GiteaComment, type GiteaIssue, type GiteaRepository, type LinkedFeatureIssue, type Product, type ProductDoc, type ProductDocSummary, type ProductFeature, type ProductOverview, type ProductRelease, type Prototype, type ReleaseStatus, type StageConfig } from './api'
 
 type Stage = string
 type Theme = 'light' | 'dark' | 'auto'
@@ -628,6 +628,56 @@ const releaseForm = ref({ name: '', description: '', targetDate: '' })
 const releaseSaving = ref(false)
 const featureStatusMap = { planned: { text: '规划中', color: '#8e99a6' }, designing: { text: '设计中', color: '#3971d3' }, developing: { text: '研发中', color: '#e79629' }, released: { text: '已发布', color: '#27a476' }, deferred: { text: '暂缓', color: '#6b7280' } } as const
 const releaseStatusMap = { pending: { text: '未开始', color: '#8e99a6' }, ongoing: { text: '进行中', color: '#e79629' }, released: { text: '已发布', color: '#27a476' }, archived: { text: '归档', color: '#6b7280' } } as const
+
+const quickSearchVisible = ref(false)
+const quickSearchKeyword = ref('')
+const quickSearchResults = ref<import('./api').QuickSearchResult>({ products: [], features: [], issues: [] })
+const quickSearchLoading = ref(false)
+const quickSearchInput = ref<{ focus: () => void } | null>(null)
+let quickSearchTimer: ReturnType<typeof setTimeout> | null = null
+async function runQuickSearch() {
+  const keyword = quickSearchKeyword.value.trim()
+  if (!keyword) { quickSearchResults.value = { products: [], features: [], issues: [] }; return }
+  quickSearchLoading.value = true
+  try { quickSearchResults.value = await searchAll(keyword) } catch { /* 忽略搜索失败 */ } finally { quickSearchLoading.value = false }
+}
+function onQuickSearchOpened() { quickSearchInput.value?.focus?.() }
+function onQuickSearchEnter() {
+  if (!quickSearchKeyword.value.trim()) return
+  const { products: pResults, features: fResults, issues: iResults } = quickSearchResults.value
+  if (pResults.length) { quickProductClick(pResults[0]); return }
+  if (fResults.length) { void quickFeatureClick(fResults[0]); return }
+  if (iResults.length) quickIssueClick(iResults[0])
+}
+function onQuickSearchInput() {
+  if (quickSearchTimer) clearTimeout(quickSearchTimer)
+  quickSearchTimer = setTimeout(runQuickSearch, 250)
+}
+function quickProductClick(product: { id: number }) {
+  const target = products.value.find((item) => item.id === product.id)
+  quickSearchVisible.value = false
+  if (target) void selectProduct(target)
+}
+async function quickFeatureClick(feature: { id: number; product_id: number }) {
+  const target = products.value.find((item) => item.id === feature.product_id)
+  quickSearchVisible.value = false
+  if (!target) return
+  await selectProduct(target)
+  productTab.value = 'features'
+  const actualFeature = productFeatures.value.find((item) => item.id === feature.id)
+  void openFeatureDrawer(actualFeature ?? null)
+}
+function quickIssueClick(issue: { html_url: string | null }) {
+  quickSearchVisible.value = false
+  if (issue.html_url) window.open(issue.html_url, '_blank', 'noreferrer')
+}
+function onGlobalKeydown(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault()
+    quickSearchVisible.value = !quickSearchVisible.value
+  }
+}
+onMounted(() => { window.addEventListener('keydown', onGlobalKeydown) })
 const featurePriorityColorMap: Record<string, string> = { P0: '#e5544b', P1: '#e79629', P2: '#3583ed', P3: '#8e99a6' }
 const stageBarColors = ['#4f7cff', '#27a476', '#e79629', '#8a56d6', '#2fb0a9', '#6b7a90', '#d9534f', '#7b6cd9', '#c8ccd4']
 function featureStatusText(status: FeatureStatus) { return featureStatusMap[status]?.text ?? status }
@@ -636,6 +686,7 @@ function releaseStatusText(status: ReleaseStatus) { return releaseStatusMap[stat
 function releaseStatusColor(status: ReleaseStatus) { return releaseStatusMap[status]?.color ?? '#8e99a6' }
 function featureReleaseName(releaseId: number | null) { if (!releaseId) return '未排期'; return productReleases.value.find((release) => release.id === releaseId)?.name ?? '未排期' }
 function releaseFeatureTotals(release: ProductRelease) { const list = productFeatures.value.filter((feature) => feature.release_id === release.id); return { total: list.length, done: list.filter((feature) => feature.status === 'released').length } }
+function releaseSegments(release: ProductRelease) { const list = productFeatures.value.filter((feature) => feature.release_id === release.id); const total = list.length || 1; return (Object.entries(featureStatusMap) as Array<[FeatureStatus, { text: string; color: string }]>).map(([status, meta]) => ({ key: status, color: meta.color, pct: (list.filter((feature) => feature.status === status).length / total) * 100 })).filter((segment) => segment.pct > 0) }
 function formatIssueState(state: string) {
   return state === 'closed' ? '已关闭' : '开放'
 }
@@ -664,15 +715,19 @@ function overviewActivityText(row: { action: string; payload: any }) {
   return map[row.action] ?? row.action
 }
 async function openFeatureDrawer(feature: ProductFeature | null) {
-  featureEditing.value = feature ? { ...feature, issues: feature.issues.map((issue) => ({ ...issue })) } : null
+  let resolved = feature
+  if (feature) {
+    try { resolved = await getFeatureDetail(feature.id) } catch { /* 打开失败则回退使用列表快照 */ }
+  }
+  featureEditing.value = resolved ? { ...resolved, issues: resolved.issues.map((issue) => ({ ...issue })) } : null
   featureForm.value = {
-    title: feature?.title ?? '',
-    description: feature?.description ?? '',
-    priority: feature?.priority ?? 'P2',
-    status: feature?.status ?? 'planned',
-    assignee: feature?.assignee ?? '',
-    releaseId: feature?.release_id ?? 0,
-    issues: feature ? feature.issues.map((issue) => ({ owner: issue.owner, repo: issue.name, number: issue.number, title: issue.title, state: issue.state })) : [],
+    title: resolved?.title ?? '',
+    description: resolved?.description ?? '',
+    priority: resolved?.priority ?? 'P2',
+    status: resolved?.status ?? 'planned',
+    assignee: resolved?.assignee ?? '',
+    releaseId: resolved?.release_id ?? 0,
+    issues: resolved ? resolved.issues.map((issue) => ({ owner: issue.owner, repo: issue.name, number: issue.number, title: issue.title, state: issue.state })) : [],
   }
   featureDescHtml.value = ''
   featureDescMode.value = 'write'
@@ -956,7 +1011,7 @@ onMounted(initializePage)
             <section v-loading="productLoading" class="products-page">
               <template v-if="!selectedProduct">
                 <div class="page-heading"><div><h1>产品</h1></div><el-button type="primary" @click="openProductDialog(null)"><el-icon><Plus /></el-icon>新建产品</el-button></div>
-                <div class="product-grid"><button v-for="product in productFiltered" :key="product.id" class="product-card" @click="selectProduct(product)"><span class="product-mark" :style="productMarkStyle(product)">{{ product.name.slice(0, 1) }}</span><strong>{{ product.name }}</strong><span class="product-card-desc">{{ product.description || '暂无描述' }}</span><small>更新于 {{ formatDate(product.updated_at) }}</small></button></div>
+                <div class="product-grid"><button v-for="product in productFiltered" :key="product.id" class="product-card" @click="selectProduct(product)"><span class="product-mark" :style="productMarkStyle(product)">{{ product.name.slice(0, 1) }}</span><strong>{{ product.name }}</strong><span class="product-card-desc">{{ product.description || '暂无描述' }}</span><small>功能 {{ product.counts?.features ?? 0 }} · 原型 {{ product.counts?.prototypes ?? 0 }} · 文档 {{ product.counts?.docs ?? 0 }}</small><small v-if="product.counts?.ongoingRelease" style="color: #326bd5;">进行中：{{ product.counts.ongoingRelease }}</small></button></div>
                 <el-empty v-if="!productLoading && products.length === 0" description="暂无产品，先新建一个" />
                 <div v-else-if="!productLoading && productFiltered.length === 0" class="muted" style="padding: 30px 0; text-align: center;">暂无产品</div>
               </template>
@@ -976,7 +1031,7 @@ onMounted(initializePage)
                           </template>
                           <el-skeleton v-else :rows="2" animated />
                         </div>
-                        <div class="panel-box overview-box">
+                        <div class="panel-box overview-box overview-clickable" role="button" @click="productTab = 'releases'">
                           <h3>下一版本</h3>
                           <template v-if="productOverview?.nextRelease">
                             <div class="ov-release-name"><strong>{{ productOverview.nextRelease.name }}</strong><i class="release-pill" :style="{ color: releaseStatusColor(productOverview.nextRelease.status), background: `${releaseStatusColor(productOverview.nextRelease.status)}1c` }">{{ releaseStatusText(productOverview.nextRelease.status) }}</i></div>
@@ -1019,7 +1074,7 @@ onMounted(initializePage)
                       <div class="release-grid"><section v-for="release in productReleases" :key="release.id" class="panel-box release-card">
                         <div class="release-head"><strong>{{ release.name }}</strong><i class="release-pill" :style="{ color: releaseStatusColor(release.status), background: `${releaseStatusColor(release.status)}1c` }">{{ releaseStatusText(release.status) }}</i></div>
                         <div class="release-meta"><span>目标 {{ release.target_date || '未设置' }}</span><span>{{ release.name }} · 功能 {{ releaseFeatureTotals(release).done }}/{{ releaseFeatureTotals(release).total }}</span></div>
-                        <div class="release-progress"><div class="release-progress-bar" :style="`width:${releaseFeatureTotals(release).total ? Math.round(releaseFeatureTotals(release).done / releaseFeatureTotals(release).total * 100) : 0}%`" /></div>
+                        <div class="stage-bar"><span v-for="segment in releaseSegments(release)" :key="segment.key" class="stage-bar-seg" :style="{ width: `${segment.pct}%`, background: segment.color }" /><span v-if="!releaseSegments(release).length" class="stage-bar-seg" style="width: 100%; background: #2b3138;" /></div>
                         <div v-if="releaseFeaturesOf(release.id).length" class="release-feature-list">
                           <div v-for="feature in releaseFeaturesOf(release.id).slice(0, 5)" :key="feature.id" class="release-feature-row" @click="openFeatureDrawer(feature)"><i class="status-dot" :style="{ background: featureStatusColor(feature.status) }" /><span>{{ feature.title }}</span><b>{{ feature.priority }}</b></div>
                           <span v-if="releaseFeaturesOf(release.id).length > 5" class="muted">… 还有 {{ releaseFeaturesOf(release.id).length - 5 }} 项</span>
@@ -1177,6 +1232,18 @@ onMounted(initializePage)
               <el-table-column prop="created_at" label="创建时间" width="180" />
               <el-table-column label="操作" width="90"><template #default="scope"><el-button link type="danger" @click="revokeUserApiToken(scope.row)">撤销</el-button></template></el-table-column>
             </el-table>
+          </el-dialog>
+          <el-dialog v-model="quickSearchVisible" title="快速搜索（⌘K）" width="620px" destroy-on-close @opened="onQuickSearchOpened">
+            <el-input ref="quickSearchInput" v-model="quickSearchKeyword" placeholder="搜索产品 / 功能项 / 全局 Issue" clearable @input="onQuickSearchInput" @keydown.enter.prevent="onQuickSearchEnter" />
+            <div v-loading="quickSearchLoading" class="quick-search-body">
+              <template v-if="quickSearchKeyword">
+                <div v-if="quickSearchResults.products.length" class="quick-section"><strong class="quick-section-title">产品</strong><div v-for="product in quickSearchResults.products" :key="product.id" class="quick-result-row" @click="quickProductClick(product)"><strong>{{ product.name }}</strong><span class="muted">{{ product.description || '暂无描述' }}</span></div></div>
+                <div v-if="quickSearchResults.features.length" class="quick-section"><strong class="quick-section-title">功能项</strong><div v-for="feature in quickSearchResults.features" :key="feature.id" class="quick-result-row" @click="quickFeatureClick(feature)"><i class="status-dot" :style="{ background: featureStatusColor(feature.status) }" /><span>{{ feature.title }}</span><b>{{ feature.priority }}</b></div></div>
+                <div v-if="quickSearchResults.issues.length" class="quick-section"><strong class="quick-section-title">Issue</strong><div v-for="issue in quickSearchResults.issues" :key="`${issue.owner}/${issue.repo}/${issue.number}`" class="quick-result-row" @click="quickIssueClick(issue)"><strong>#{{ issue.number }}</strong><span>{{ issue.title }}</span><small>{{ issue.owner }}/{{ issue.repo }}</small></div></div>
+                <div v-if="!quickSearchResults.products.length && !quickSearchResults.features.length && !quickSearchResults.issues.length" class="muted" style="padding: 20px 0;">无匹配结果</div>
+              </template>
+              <div v-else class="muted" style="padding: 20px 0;">输入关键词搜索，Enter 打开第一条（即将实现）。</div>
+            </div>
           </el-dialog>
         </template>
       </main>

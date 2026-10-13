@@ -278,7 +278,26 @@ button, input, select { font: inherit; }
 .ov-release-name strong { font-size: 20px; color: #26334a; }
 .release-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-style: normal; font-weight: 600; }
 .ov-countdown { margin-top: 10px; font-size: 18px; font-weight: 600; color: #26334a; }
+.overview-clickable { cursor: pointer; transition: all .15s; }
+.overview-clickable:hover { border-color: #9bb3f6; box-shadow: 0 4px 12px rgb(40 75 145 / 8%); transform: translateY(-1px); }
+.quick-search-body { margin-top: 12px; max-height: 400px; overflow-y: auto; }
+.quick-search-dialog .el-dialog__body { padding-top: 10px; }
+.quick-section { margin-bottom: 14px; }
+.quick-section-title { display: block; color: #8a95a7; font-size: 11px; font-weight: 600; margin-bottom: 4px; }
+.quick-result-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.quick-result-row:hover { background: #f1f4f8; color: #326bd5; }
+.quick-result-row small { color: #8a95a7; white-space: nowrap; }
+.quick-result-row strong { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-result-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-result-row b { font-size: 11px; color: #8a95a7; }
+html[data-theme='dark'] .quick-result-row:hover { background: #30363d; color: #79b8ff; }
+html[data-theme='dark'] .quick-result-row small,
+html[data-theme='dark'] .quick-result-row b { color: #8b949e; }
+html[data-theme='dark'] .quick-section-title { color: #8b949e; }
+html[data-theme='dark'] .overview-clickable:hover { border-color: #6d8fc7; box-shadow: 0 4px 12px rgb(0 0 0 / 24%); }
+html[data-theme='dark'] .ov-countdown { color: #d7dbe0; }
 .ov-countdown.overdue { color: #e5544b; }
+html[data-theme='dark'] .ov-countdown.overdue { color: #ff9b9b; }
 .overview-activity .activity-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid #f3f5f8; font-size: 13px; }
 .overview-activity .activity-row:last-child { border-bottom: none; }
 .overview-activity .activity-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
