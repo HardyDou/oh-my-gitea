@@ -110,6 +110,7 @@ const docDraft = ref({ title: '', content: '' })
 const docSaving = ref(false)
 const docHtml = ref('')
 const docPreviewLoading = ref(false)
+const docMode = ref<'write' | 'preview'>('write')
 const productPrototypes = ref<Prototype[]>([])
 const prototypeRepoInput = ref('')
 const buildTagDrafts = ref<Record<number, string>>({})
@@ -514,6 +515,12 @@ function newDoc() {
   currentDoc.value = { id: 0, product_id: selectedProduct.value?.id ?? 0, title: '', content: '', created_at: '', updated_at: '' }
   docDraft.value = { title: '', content: '' }
   docHtml.value = ''
+  docMode.value = 'write'
+}
+async function closeDoc() {
+  if (!(await confirmLeaveDoc())) return
+  currentDoc.value = null
+  docMode.value = 'write'
 }
 async function confirmLeaveDoc() {
   if (!docDirty.value) return true
@@ -526,12 +533,16 @@ async function openDoc(summary: ProductDocSummary) {
     currentDoc.value = doc
     docDraft.value = { title: doc.title, content: doc.content }
     docHtml.value = ''
+    docMode.value = 'write'
   } catch (error) { ElMessage.error((error as Error).message || '文档加载失败') }
 }
-async function previewDoc() {
-  if (docHtml.value) { docHtml.value = ''; return }
-  docPreviewLoading.value = true
-  try { docHtml.value = (await renderMarkdown(docDraft.value.content)).html } catch (error) { ElMessage.error((error as Error).message || '预览失败') } finally { docPreviewLoading.value = false }
+async function switchDocMode(mode: 'write' | 'preview') {
+  if (mode === docMode.value) return
+  if (mode === 'preview') {
+    docPreviewLoading.value = true
+    try { docHtml.value = (await renderMarkdown(docDraft.value.content)).html } catch (error) { ElMessage.error((error as Error).message || '预览失败'); return } finally { docPreviewLoading.value = false }
+  }
+  docMode.value = mode
 }
 async function saveCurrentDoc() {
   const title = docDraft.value.title.trim()
@@ -764,17 +775,19 @@ onMounted(initializePage)
                   <section class="products-main">
                     <el-radio-group v-model="productTab" class="products-tabs"><el-radio-button value="docs">文档（{{ productDocs.length }}）</el-radio-button><el-radio-button value="prototypes">原型（{{ productPrototypes.length }}）</el-radio-button></el-radio-group>
                     <template v-if="productTab === 'docs'">
-                      <div class="doc-layout">
-                        <aside class="doc-list panel-box"><div class="panel-head"><strong>产品文档</strong><el-button size="small" text type="primary" @click="newDoc">＋新建</el-button></div><button v-for="doc in productDocs" :key="doc.id" class="doc-item" :class="{ active: currentDoc?.id === doc.id }" @click="openDoc(doc)"><strong>{{ doc.title }}</strong><span>{{ formatDate(doc.updated_at) }}</span></button><el-empty v-if="productDocs.length === 0 && !currentDoc" description="暂无文档" :image-size="50" /></aside>
-                        <section v-if="currentDoc" class="doc-editor panel-box">
-                          <div class="doc-editor-head"><el-input v-model="docDraft.title" placeholder="文档标题" class="doc-title-input" /><span v-if="docDirty" class="dirty-hint">● 未保存</span><el-button plain @click="previewDoc" :loading="docPreviewLoading">{{ docHtml ? '收起预览' : '预览' }}</el-button><el-button type="primary" :disabled="!docDirty" :loading="docSaving" @click="saveCurrentDoc">保存</el-button><el-button type="danger" plain @click="removeDoc(currentDoc)">删除</el-button></div>
-                          <div class="doc-editor-body" :class="{ split: docHtml }">
-                            <textarea v-model="docDraft.content" class="doc-markdown-text" placeholder="使用 Markdown 编写产品文档…" />
-                            <div v-if="docHtml" class="doc-markdown-preview markdown-body rendered-markdown" v-html="docHtml"></div>
-                          </div>
-                        </section>
-                        <el-empty v-else description="选择左侧文档进行编辑" :image-size="60" />
+                      <div v-if="!currentDoc" class="panel-box doc-list-panel">
+                        <div class="panel-head"><strong>文档（{{ productDocs.length }}）</strong><el-button size="small" text type="primary" @click="newDoc">＋新建</el-button></div>
+                        <button v-for="doc in productDocs" :key="doc.id" class="doc-row" @click="openDoc(doc)"><strong>{{ doc.title }}</strong><span class="doc-row-time">更新于 {{ formatDate(doc.updated_at) }}</span><el-button link type="danger" @click.stop="removeDoc(doc)">删除</el-button></button>
+                        <el-empty v-if="productDocs.length === 0" description="暂无文档，点击右上角新建" :image-size="50" />
                       </div>
+                      <section v-else class="doc-editor panel-box">
+                        <div class="doc-editor-head"><el-button text @click="closeDoc">← 返回文档列表</el-button><el-input v-model="docDraft.title" placeholder="文档标题" class="doc-title-input" /><span v-if="docDirty" class="dirty-hint">● 未保存</span><el-button type="primary" :disabled="!docDirty" :loading="docSaving" @click="saveCurrentDoc">保存</el-button><el-button type="danger" plain @click="removeDoc(currentDoc)">删除</el-button></div>
+                        <div class="doc-mode-tabs"><button :class="{ active: docMode === 'write' }" @click="switchDocMode('write')">编辑</button><button :class="{ active: docMode === 'preview' }" @click="switchDocMode('preview')">预览</button></div>
+                        <div v-loading="docPreviewLoading" class="doc-mode-body">
+                          <textarea v-show="docMode === 'write'" v-model="docDraft.content" class="doc-markdown-text" placeholder="使用 Markdown 编写产品文档…" />
+                          <div v-show="docMode === 'preview'" class="doc-markdown-preview gitea-md rendered-markdown" v-html="docHtml"></div>
+                        </div>
+                      </section>
                     </template>
                     <template v-else>
                       <div class="panel-box prototype-add"><el-input v-model="prototypeRepoInput" placeholder="Gitea 仓库地址或 owner/repo" style="max-width: 360px" /><el-button type="primary" plain @click="addPrototype">添加原型仓库</el-button></div>
