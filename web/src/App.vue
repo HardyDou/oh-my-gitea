@@ -569,6 +569,11 @@ async function startBuild(prototype: Prototype) {
   } catch (error) { ElMessage.error((error as Error).message || '构建启动失败') } finally { buildStarting.value = false }
 }
 function safeTagCheck(tag: string) { return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tag) }
+function productMarkStyle(product: Product) { return { background: `hsl(${(Number(product.id) * 67) % 360} 62% 46%)` } }
+const buildStatusMap = { pending: { text: '排队中', color: '#9aa4b5' }, building: { text: '构建中', color: '#e79629' }, success: { text: '已构建', color: '#27a476' }, failed: { text: '构建失败', color: '#e5544b' } } as const
+function statusColor(status: PrototypeBuild['status']) { return buildStatusMap[status].color }
+function statusText(status: PrototypeBuild['status']) { return buildStatusMap[status].text }
+const totalBuilds = computed(() => productPrototypes.value.reduce((count, prototype) => count + prototype.builds.length, 0))
 async function refreshBuilds() {
   if (!selectedProduct.value) return
   const previous = productPrototypes.value
@@ -702,7 +707,7 @@ onMounted(initializePage)
 
 <template>
   <el-container class="app-shell">
-    <aside class="sidebar"><div class="brand"><span class="brand-mark">G</span><span>Gitea PM</span></div><nav class="nav"><div class="nav-title">工作台</div><div class="nav-item" :class="{ active: activeView === 'dashboard' }" @click="openDashboard"><el-icon><House /></el-icon><span>工作台首页</span></div><div class="nav-item" :class="{ active: activeView === 'board' || activeView === 'issues' }" @click="openProjectView"><el-icon><Grid /></el-icon><span>项目看板</span></div><div class="nav-item" :class="{ active: activeView === 'products' }" @click="openProducts"><el-icon><Box /></el-icon><span>产品管理</span></div><div class="nav-title settings-nav-title">系统</div><div class="nav-item" :class="{ active: activeView === 'settings' }" @click="openStageSettings"><el-icon><Setting /></el-icon><span>系统配置</span></div></nav><div class="sidebar-foot">Gitea PM<br />v0.1.0</div></aside>
+    <aside class="sidebar"><div class="brand"><span class="brand-mark">G</span><span>Gitea PM</span></div><nav class="nav"><div class="nav-title">工作</div><div class="nav-item" :class="{ active: activeView === 'dashboard' }" @click="openDashboard"><el-icon><House /></el-icon><span>工作台首页</span></div><div class="nav-item" :class="{ active: activeView === 'board' || activeView === 'issues' }" @click="openProjectView"><el-icon><Grid /></el-icon><span>项目看板</span></div><div class="nav-item" :class="{ active: activeView === 'products' }" @click="openProducts"><el-icon><Box /></el-icon><span>产品管理</span></div><div class="nav-title settings-nav-title">系统</div><div class="nav-item" :class="{ active: activeView === 'settings' }" @click="openStageSettings"><el-icon><Setting /></el-icon><span>系统配置</span></div></nav><div class="sidebar-foot">Gitea PM<br />v0.1.0</div></aside>
     <el-container class="main">
       <header class="topbar"><div class="topbar-left"><span class="page-title">{{ pageTitle }}</span><el-select v-if="repos.length" v-model="selectedRepo" class="repo-select" filterable placeholder="选择仓库" aria-label="选择仓库"><template #prefix>仓库</template><el-option v-for="repo in repos" :key="repo" :label="repo" :value="repo" /></el-select><el-tag type="info" effect="plain">Gitea 数据源</el-tag></div><div class="topbar-right"><el-button class="api-token-button" text @click="openApiTokenDialog">API 凭证</el-button><el-dropdown class="theme-dropdown" popper-class="theme-dropdown-popper" trigger="click" @command="setTheme"><button class="theme-button" type="button"><el-icon><Monitor v-if="theme === 'auto'" /><Moon v-else-if="theme === 'dark'" /><Sunny v-else /></el-icon><span>主题</span></button><template #dropdown><el-dropdown-menu><el-dropdown-item command="auto"><Monitor /> 自动（跟随系统）</el-dropdown-item><el-dropdown-item command="light"><Sunny /> 浅色</el-dropdown-item><el-dropdown-item command="dark"><Moon /> 深色</el-dropdown-item></el-dropdown-menu></template></el-dropdown><el-popover placement="bottom-end" :width="340" trigger="click"><template #reference><button class="notification-button" title="通知"><el-icon><Bell /></el-icon><el-badge v-if="unreadNotifications.length" :value="unreadNotifications.length" :max="9" /></button></template><div class="notification-panel"><div class="notification-title">通知</div><div v-if="notifications.length === 0" class="muted">暂无新通知</div><button v-for="item in notifications" :key="item.key" class="notification-item" :class="{ unread: !readNotificationKeys.includes(item.key) }" @click="openNotification(item)"><strong>#{{ item.issue.number }} {{ item.issue.title }}</strong><span>{{ item.text }}</span></button></div></el-popover><div class="user"><el-avatar :size="30" :src="currentUser?.avatar_url ?? undefined" :icon="User" /><span>{{ currentUser?.display_name || currentUser?.login || '用户' }}</span></div></div></header>
       <main class="content">
@@ -730,43 +735,59 @@ onMounted(initializePage)
           </template>
           <template v-else-if="activeView === 'products'">
             <section v-loading="productLoading" class="products-page">
-              <div v-if="!selectedProduct">
+              <template v-if="!selectedProduct">
                 <div class="page-heading"><div><h1>产品管理</h1><p>登记产品基础信息、维护产品文档和原型版本。</p></div><el-button type="primary" @click="openProductDialog(null)"><el-icon><Plus /></el-icon>新建产品</el-button></div>
-                <div class="product-grid"><button v-for="product in products" :key="product.id" class="product-card" @click="selectProduct(product)"><strong>{{ product.name }}</strong><span>{{ product.description || '暂无描述' }}</span><small>更新于 {{ formatDate(product.updated_at) }}</small></button></div>
+                <div class="product-grid"><button v-for="product in products" :key="product.id" class="product-card" @click="selectProduct(product)"><span class="product-mark" :style="productMarkStyle(product)">{{ product.name.slice(0, 1) }}</span><strong>{{ product.name }}</strong><span class="product-card-desc">{{ product.description || '暂无描述' }}</span><small>更新于 {{ formatDate(product.updated_at) }}</small></button></div>
                 <el-empty v-if="!productLoading && products.length === 0" description="暂无产品，先新建一个" />
-              </div>
+              </template>
               <template v-else>
-                <div class="page-heading"><div><el-button text @click="selectProduct(null)"><el-icon><ArrowLeft /></el-icon>返回产品列表</el-button><h1>{{ selectedProduct.name }}</h1><p>{{ selectedProduct.description || '暂无描述' }}</p></div><div><el-button plain @click="openProductDialog(selectedProduct)">编辑</el-button><el-button type="danger" plain @click="removeProduct(selectedProduct)">删除</el-button></div></div>
-                <el-radio-group v-model="productTab" style="margin-bottom: 18px"><el-radio-button value="docs">文档</el-radio-button><el-radio-button value="prototypes">原型</el-radio-button></el-radio-group>
-                <template v-if="productTab === 'docs'">
-                  <div class="doc-layout">
-                    <aside class="doc-list panel-box"><div class="panel-head"><strong>产品文档</strong><el-button size="small" text type="primary" @click="newDoc">＋新建</el-button></div><button v-for="doc in productDocs" :key="doc.id" class="doc-item" :class="{ active: currentDoc?.id === doc.id }" @click="openDoc(doc)"><strong>{{ doc.title }}</strong><span>{{ formatDate(doc.updated_at) }}</span></button><el-empty v-if="productDocs.length === 0 && !currentDoc" description="暂无文档" :image-size="50" /></aside>
-                    <section v-if="currentDoc" class="doc-editor panel-box">
-                      <div class="doc-editor-head"><el-input v-model="docDraft.title" placeholder="文档标题" class="doc-title-input" /><el-button plain @click="previewDoc" :loading="docPreviewLoading">预览</el-button><el-button type="primary" :loading="docSaving" @click="saveCurrentDoc">保存</el-button><el-button type="danger" plain @click="removeDoc(currentDoc)">删除</el-button></div>
-                      <div class="doc-editor-body">
-                        <textarea v-model="docDraft.content" class="doc-markdown-text" placeholder="使用 Markdown 编写产品文档…" />
-                        <div v-if="docHtml" class="doc-markdown-preview markdown-body rendered-markdown" v-html="docHtml"></div>
+                <div class="products-crumb"><button class="crumb-link" @click="selectProduct(null)">产品管理</button><span>/</span><strong>{{ selectedProduct.name }}</strong></div>
+                <div class="products-detail-layout">
+                  <section class="products-main">
+                    <el-radio-group v-model="productTab" class="products-tabs"><el-radio-button value="docs">文档（{{ productDocs.length }}）</el-radio-button><el-radio-button value="prototypes">原型（{{ productPrototypes.length }}）</el-radio-button></el-radio-group>
+                    <template v-if="productTab === 'docs'">
+                      <div class="doc-layout">
+                        <aside class="doc-list panel-box"><div class="panel-head"><strong>产品文档</strong><el-button size="small" text type="primary" @click="newDoc">＋新建</el-button></div><button v-for="doc in productDocs" :key="doc.id" class="doc-item" :class="{ active: currentDoc?.id === doc.id }" @click="openDoc(doc)"><strong>{{ doc.title }}</strong><span>{{ formatDate(doc.updated_at) }}</span></button><el-empty v-if="productDocs.length === 0 && !currentDoc" description="暂无文档" :image-size="50" /></aside>
+                        <section v-if="currentDoc" class="doc-editor panel-box">
+                          <div class="doc-editor-head"><el-input v-model="docDraft.title" placeholder="文档标题" class="doc-title-input" /><el-button plain @click="previewDoc" :loading="docPreviewLoading">预览</el-button><el-button type="primary" :loading="docSaving" @click="saveCurrentDoc">保存</el-button><el-button type="danger" plain @click="removeDoc(currentDoc)">删除</el-button></div>
+                          <div class="doc-editor-body">
+                            <textarea v-model="docDraft.content" class="doc-markdown-text" placeholder="使用 Markdown 编写产品文档…" />
+                            <div v-if="docHtml" class="doc-markdown-preview markdown-body rendered-markdown" v-html="docHtml"></div>
+                          </div>
+                        </section>
+                        <el-empty v-else description="选择左侧文档进行编辑" :image-size="60" />
                       </div>
-                    </section>
-                    <el-empty v-else description="选择左侧文档进行编辑" :image-size="60" />
-                  </div>
-                </template>
-                <template v-else>
-                  <div class="panel-box prototype-add"><el-input v-model="prototypeRepoInput" placeholder="Gitea 仓库地址或 owner/repo" style="max-width: 360px" /><el-button type="primary" plain @click="addPrototype">添加原型仓库</el-button></div>
-                  <section v-for="prototype in productPrototypes" :key="prototype.id" class="panel-box prototype-card">
-                    <div class="prototype-head"><strong>{{ prototype.repository_full_name }}</strong><el-button link type="danger" @click="removePrototype(prototype)">移除</el-button></div>
-                    <div class="prototype-build-bar"><el-input v-model="buildTagInput" placeholder="Tag，例如 v1.0.0" style="max-width: 220px" @keyup.enter="startBuild(prototype)" /><el-button type="primary" :loading="buildStarting" @click="startBuild(prototype)">构建该版本</el-button></div>
-                    <div v-for="build in prototype.builds" :key="build.id" class="build-row">
-                      <el-tag size="small" effect="plain">{{ build.tag }}</el-tag>
-                      <el-tag size="small" :type="build.status === 'success' ? 'success' : build.status === 'failed' ? 'danger' : 'warning'">{{ { pending: '排队中', building: '构建中', success: '已构建', failed: '构建失败' }[build.status] }}</el-tag>
-                      <span class="muted">{{ formatDate(build.created_at) }}</span>
-                      <a v-if="build.status === 'success'" class="build-link" :href="buildUrl(prototype, build.tag)" target="_blank" rel="noreferrer">打开原型 ↗</a>
-                      <el-button link type="primary" @click="viewBuildLog(build)">日志</el-button>
-                    </div>
-                    <div v-if="prototype.builds.length === 0" class="muted">还没有构建记录，输入 Tag 后点击构建。</div>
+                    </template>
+                    <template v-else>
+                      <div class="panel-box prototype-add"><el-input v-model="prototypeRepoInput" placeholder="Gitea 仓库地址或 owner/repo" style="max-width: 360px" /><el-button type="primary" plain @click="addPrototype">添加原型仓库</el-button></div>
+                      <section v-for="prototype in productPrototypes" :key="prototype.id" class="panel-box prototype-card">
+                        <div class="prototype-head"><span class="repo-mark"><el-icon><Box /></el-icon></span><strong>{{ prototype.repository_full_name }}</strong><el-button link type="danger" @click="removePrototype(prototype)">移除</el-button></div>
+                        <div class="prototype-build-bar"><el-input v-model="buildTagInput" placeholder="Tag，例如 v1.0.0" style="max-width: 220px" @keyup.enter="startBuild(prototype)" /><el-button type="primary" :loading="buildStarting" @click="startBuild(prototype)">按 Tag 构建</el-button></div>
+                        <div v-if="prototype.builds.length" class="version-chips">
+                          <span v-for="build in prototype.builds" :key="build.id" class="version-chip" @click="viewBuildLog(build)"><i class="version-dot" :style="{ background: statusColor(build.status) }" /><strong>{{ build.tag }}</strong><em>{{ statusText(build.status) }}</em><a v-if="build.status === 'success'" class="chip-open" :href="buildUrl(prototype, build.tag)" target="_blank" rel="noreferrer" @click.stop>↗</a></span>
+                        </div>
+                        <div v-else class="muted">还没有构建记录，输入 Tag 后点击构建。</div>
+                      </section>
+                      <el-empty v-if="productPrototypes.length === 0" description="尚未添加原型仓库" />
+                    </template>
                   </section>
-                  <el-empty v-if="productPrototypes.length === 0" description="尚未添加原型仓库" />
-                </template>
+                  <aside class="products-side">
+                    <div class="panel-box">
+                      <h3>产品信息</h3>
+                      <div class="side-row"><span>名称</span><b>{{ selectedProduct.name }}</b></div>
+                      <div class="side-row"><span>描述</span><b>{{ selectedProduct.description || '暂无' }}</b></div>
+                      <div class="side-row"><span>创建时间</span><b>{{ formatDate(selectedProduct.created_at) }}</b></div>
+                      <div class="side-row"><span>更新时间</span><b>{{ formatDate(selectedProduct.updated_at) }}</b></div>
+                      <div class="side-actions"><el-button size="small" plain @click="openProductDialog(selectedProduct)">编辑</el-button><el-button size="small" type="danger" plain @click="removeProduct(selectedProduct)">删除</el-button></div>
+                    </div>
+                    <div class="panel-box">
+                      <h3>概览</h3>
+                      <div class="side-row"><span>文档</span><b>{{ productDocs.length }}</b></div>
+                      <div class="side-row"><span>原型仓库</span><b>{{ productPrototypes.length }}</b></div>
+                      <div class="side-row"><span>构建版本</span><b>{{ totalBuilds }}</b></div>
+                    </div>
+                  </aside>
+                </div>
               </template>
             </section>
           </template>
