@@ -283,7 +283,32 @@ button, input, select { font: inherit; }
 .overview-activity .activity-row:last-child { border-bottom: none; }
 .overview-activity .activity-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .overview-activity small { color: #9aa4b3; white-space: nowrap; font-size: 11px; }
-.feature-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.feature-health-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.status-health { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: #57606a; cursor: pointer; font-size: 13px; }
+.status-health:hover { background: #f1f4f8; }
+.status-health.active { background: #eef4ff; border-color: #b7d0f7; color: #326bd5; font-weight: 600; }
+.status-health .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+.status-health .all-dot { background: #26334a; }
+.status-count { color: #9aa4b3; font-size: 11px; font-weight: 500; }
+.status-health.active .status-count { color: #326bd5; }
+.feature-issue-chip { display: inline-block; margin-left: 6px; padding: 2px 7px; border: 1px solid #dfe4ed; border-radius: 5px; background: #fafbfc; color: #3971d3; font-size: 11px; text-decoration: none; }
+.feature-issue-chip:hover { border-color: #9bb3f6; background: #f0f6ff; }
+.feature-issue-chip.closed { color: #8a95a7; }
+.feature-empty { padding: 30px 0; color: #8a95a7; font-size: 13px; }
+.release-feature-list { display: flex; flex-direction: column; gap: 4px; }
+.release-feature-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.release-feature-row:hover { background: #f6f8fa; }
+.release-feature-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.release-feature-row b { font-size: 11px; color: #8a95a7; font-weight: 600; }
+.release-feature-row .status-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; }
+html[data-theme='dark'] .status-health { color: #9da5ae; }
+html[data-theme='dark'] .status-health:hover { background: #262b31; }
+html[data-theme='dark'] .status-health.active { background: #2b3543; border-color: #3a5f92; color: #79b8ff; }
+html[data-theme='dark'] .status-health.active .status-count { color: #79b8ff; }
+html[data-theme='dark'] .status-health .all-dot { background: #d7dbe0; }
+html[data-theme='dark'] .feature-issue-chip { background: #1f2429; border-color: #3d4248; color: #58a6ff; }
+html[data-theme='dark'] .feature-issue-chip.closed { color: #8b949e; }
+html[data-theme='dark'] .release-feature-row:hover { background: #262b31; }
 .feature-filter { width: 140px; }
 .feature-table .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 0; border-radius: 999px; cursor: pointer; font-size: 12px; font-weight: 600; }
 .feature-table .status-dot { width: 6px; height: 6px; border-radius: 50%; }

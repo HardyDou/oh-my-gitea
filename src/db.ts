@@ -160,17 +160,17 @@ export async function updateBuildStatus(id: number, status: PrototypeBuildRow['s
 export async function getBuild(id: number) { return (await query<PrototypeBuildRow>('SELECT * FROM prototype_build WHERE id = $1', [id])).rows[0] }
 export async function updateBuildLog(id: number, log: string) { await query('UPDATE prototype_build SET log = $2 WHERE id = $1', [id, log]) }
 
-export type FeatureIssueSnapshot = { owner: string; name: string; number: number; title: string; state: string }
+export type FeatureIssueSnapshot = { owner: string; name: string; number: number; title: string; state: string; html_url: string | null }
 export type ProductFeatureRow = { id: number; product_id: number; release_id: number | null; title: string; description: string; status: string; priority: string; assignee: string | null; created_by: number | null; created_at: string; updated_at: string; issues: FeatureIssueSnapshot[] }
 export type ProductReleaseRow = { id: number; product_id: number; name: string; description: string | null; status: string; target_date: string | null; released_at: string | null; created_by: number | null; created_at: string; updated_at: string }
 
 async function attachFeatureIssues(rows: ProductFeatureRow[]) {
   if (!rows.length) return rows
-  const link = await query<{ feature_id: number; owner: string; name: string; issue_number: number; title: string; state: string }>(`SELECT fi.feature_id, fi.issue_number, fi.title, fi.state, r.owner, r.name FROM feature_issue fi JOIN repository r ON r.id = fi.repository_id WHERE fi.feature_id = ANY($1::bigint[]) ORDER BY fi.id`, [rows.map((row) => row.id)])
+  const link = await query<{ feature_id: number; owner: string; name: string; issue_number: number; title: string; state: string; html_url: string | null }>(`SELECT fi.feature_id, fi.issue_number, fi.title, fi.state, r.owner, r.name, r.html_url FROM feature_issue fi JOIN repository r ON r.id = fi.repository_id WHERE fi.feature_id = ANY($1::bigint[]) ORDER BY fi.id`, [rows.map((row) => row.id)])
   const map = new Map<number, FeatureIssueSnapshot[]>()
   for (const row of link.rows) {
     const list = map.get(row.feature_id) ?? []
-    list.push({ owner: row.owner, name: row.name, number: row.issue_number, title: row.title, state: row.state })
+    list.push({ owner: row.owner, name: row.name, number: row.issue_number, title: row.title, state: row.state, html_url: row.html_url ?? null })
     map.set(row.feature_id, list)
   }
   return rows.map((row) => ({ ...row, issues: map.get(row.id) ?? [] }))

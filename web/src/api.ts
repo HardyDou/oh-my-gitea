@@ -165,7 +165,7 @@ export function getBuild(id: number) {
 
 export type FeatureStatus = 'planned' | 'designing' | 'developing' | 'released' | 'deferred'
 export type ReleaseStatus = 'pending' | 'ongoing' | 'released' | 'archived'
-export type LinkedFeatureIssue = { owner: string; name: string; number: number; title: string; state: string }
+export type LinkedFeatureIssue = { owner: string; name: string; number: number; title: string; state: string; html_url: string | null }
 export type ProductFeature = { id: number; product_id: number; release_id: number | null; title: string; description: string; status: FeatureStatus; priority: string; assignee: string | null; created_at: string; updated_at: string; issues: LinkedFeatureIssue[] }
 export type ProductRelease = { id: number; product_id: number; name: string; description: string | null; status: ReleaseStatus; target_date: string | null; released_at: string | null; created_at: string; updated_at: string }
 export type FeaturePayload = { title?: string; description?: string; status?: FeatureStatus; priority?: string; assignee?: string | null; releaseId?: number | null; issues?: Array<{ owner: string; repo: string; number: number }> }
