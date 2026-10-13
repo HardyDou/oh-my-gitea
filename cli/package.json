@@ -1,15 +1,26 @@
 {
   "name": "oh-my-gitea-cli",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "CLI for operating oh-my-gitea issues with a user's Gitea token",
   "type": "module",
   "bin": {
     "omg": "./bin/omg.mjs"
   },
-  "files": ["bin", "README.md", "skills"],
-  "keywords": ["pi-package", "gitea", "issue-management", "cli"],
+  "files": [
+    "bin",
+    "README.md",
+    "skills"
+  ],
+  "keywords": [
+    "pi-package",
+    "gitea",
+    "issue-management",
+    "cli"
+  ],
   "pi": {
-    "skills": ["./skills"]
+    "skills": [
+      "./skills"
+    ]
   },
   "engines": {
     "node": ">=18"

@@ -162,3 +162,53 @@ export function createBuild(prototypeId: number, tag: string) {
 export function getBuild(id: number) {
   return request<PrototypeBuild>(`/api/v1/builds/${id}`)
 }
+
+export type FeatureStatus = 'planned' | 'designing' | 'developing' | 'released' | 'deferred'
+export type ReleaseStatus = 'pending' | 'ongoing' | 'released' | 'archived'
+export type LinkedFeatureIssue = { owner: string; name: string; number: number; title: string; state: string }
+export type ProductFeature = { id: number; product_id: number; release_id: number | null; title: string; description: string; status: FeatureStatus; priority: string; assignee: string | null; created_at: string; updated_at: string; issues: LinkedFeatureIssue[] }
+export type ProductRelease = { id: number; product_id: number; name: string; description: string | null; status: ReleaseStatus; target_date: string | null; released_at: string | null; created_at: string; updated_at: string }
+export type FeaturePayload = { title?: string; description?: string; status?: FeatureStatus; priority?: string; assignee?: string | null; releaseId?: number | null; issues?: Array<{ owner: string; repo: string; number: number }> }
+export type ProductOverview = {
+  features: Record<FeatureStatus, number> & { total?: number }
+  issues: { total: number; byStage: Record<string, number> }
+  nextRelease: ProductRelease | null
+  activity: Array<{ action: string; resource: string; payload: any; created_at: string }>
+}
+
+export function getProduct(productId: number) {
+  return request<{ features: ProductFeature[]; releases: ProductRelease[] }>(`/api/v1/products/${productId}`)
+}
+export function getFeatures(productId: number) {
+  return request<{ items: ProductFeature[] }>(`/api/v1/products/${productId}/features`)
+}
+export function createFeature(productId: number, data: FeaturePayload) {
+  return request<ProductFeature>(`/api/v1/products/${productId}/features`, { method: 'POST', body: JSON.stringify(data) })
+}
+export function updateFeature(id: number, data: FeaturePayload) {
+  return request<ProductFeature>(`/api/v1/features/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+}
+export function deleteFeature(id: number) {
+  return request<{ ok: boolean }>(`/api/v1/features/${id}`, { method: 'DELETE' })
+}
+export function getReleases(productId: number) {
+  return request<{ items: ProductRelease[] }>(`/api/v1/products/${productId}/releases`)
+}
+export function createRelease(productId: number, data: { name: string; description?: string; targetDate?: string | null }) {
+  return request<ProductRelease>(`/api/v1/products/${productId}/releases`, { method: 'POST', body: JSON.stringify(data) })
+}
+export function updateRelease(id: number, data: { name?: string; description?: string; targetDate?: string | null }) {
+  return request<ProductRelease>(`/api/v1/releases/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+}
+export function setReleaseStatus(id: number, status: ReleaseStatus) {
+  return request<ProductRelease>(`/api/v1/releases/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) })
+}
+export function deleteRelease(id: number) {
+  return request<{ ok: boolean }>(`/api/v1/releases/${id}`, { method: 'DELETE' })
+}
+export function getProductOverview(productId: number) {
+  return request<ProductOverview>(`/api/v1/products/${productId}/overview`)
+}
+export function searchIssues(q: string) {
+  return request<{ items: Array<{ owner: string; repo: string; number: number; title: string; state: string }> }>(`/api/v1/issue-search?q=${encodeURIComponent(q)}`)
+}

@@ -48,6 +48,27 @@ omg due-date OWNER REPO NUMBER 2026-12-31
 omg due-date OWNER REPO NUMBER clear
 ```
 
+
+## 产品管理（功能项与版本）
+
+```bash
+# 产品清单与聚合详情（功能项+版本）
+omg products
+omg product PRODUCT_ID
+
+# 功能项
+omg feature list PRODUCT_ID
+omg feature add PRODUCT_ID 标题 --priority P1 --status planned --assignee douxy --issue OWNER/REPO#1532 --release 2
+omg feature update FEATURE_ID --status designing --priority P0 --release 2 --desc 简要说明
+omg feature update FEATURE_ID --release clear
+
+# 版本
+omg release list PRODUCT_ID
+```
+
+状态码：功能项 `planned / designing / developing / released / deferred`；版本 `pending / ongoing / released / archived`。
+--issue 可重复传多个，格式 OWNER/REPO#编号。功能项是需求骨架；Issue 的阶段/子阶段仍用 `omg management` 推进。
+
 ## 操作规则
 
 - 修改前先确认仓库、Issue 编号和目标值；阶段操作使用编码，不要猜测编码。

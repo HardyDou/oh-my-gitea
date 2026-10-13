@@ -159,3 +159,82 @@ export async function updateBuildStatus(id: number, status: PrototypeBuildRow['s
 }
 export async function getBuild(id: number) { return (await query<PrototypeBuildRow>('SELECT * FROM prototype_build WHERE id = $1', [id])).rows[0] }
 export async function updateBuildLog(id: number, log: string) { await query('UPDATE prototype_build SET log = $2 WHERE id = $1', [id, log]) }
+
+export type FeatureIssueSnapshot = { owner: string; name: string; number: number; title: string; state: string }
+export type ProductFeatureRow = { id: number; product_id: number; release_id: number | null; title: string; description: string; status: string; priority: string; assignee: string | null; created_by: number | null; created_at: string; updated_at: string; issues: FeatureIssueSnapshot[] }
+export type ProductReleaseRow = { id: number; product_id: number; name: string; description: string | null; status: string; target_date: string | null; released_at: string | null; created_by: number | null; created_at: string; updated_at: string }
+
+async function attachFeatureIssues(rows: ProductFeatureRow[]) {
+  if (!rows.length) return rows
+  const link = await query<{ feature_id: number; owner: string; name: string; issue_number: number; title: string; state: string }>(`SELECT fi.feature_id, fi.issue_number, fi.title, fi.state, r.owner, r.name FROM feature_issue fi JOIN repository r ON r.id = fi.repository_id WHERE fi.feature_id = ANY($1::bigint[]) ORDER BY fi.id`, [rows.map((row) => row.id)])
+  const map = new Map<number, FeatureIssueSnapshot[]>()
+  for (const row of link.rows) {
+    const list = map.get(row.feature_id) ?? []
+    list.push({ owner: row.owner, name: row.name, number: row.issue_number, title: row.title, state: row.state })
+    map.set(row.feature_id, list)
+  }
+  return rows.map((row) => ({ ...row, issues: map.get(row.id) ?? [] }))
+}
+
+export async function listFeatures(productId: number) {
+  return attachFeatureIssues((await query<ProductFeatureRow>('SELECT * FROM product_feature WHERE product_id = $1 ORDER BY updated_at DESC, id DESC', [productId])).rows)
+}
+export async function getFeature(id: number) {
+  const rows = (await query<ProductFeatureRow>('SELECT * FROM product_feature WHERE id = $1', [id])).rows
+  if (!rows[0]) return null
+  return (await attachFeatureIssues(rows))[0]
+}
+export async function createFeature(input: { productId: number; title: string; description: string; status: string; priority: string; assignee: string | null; releaseId: number | null; createdBy: number }) {
+  const result = await query<ProductFeatureRow>('INSERT INTO product_feature (product_id, title, description, status, priority, assignee, release_id, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *', [input.productId, input.title, input.description, input.status, input.priority, input.assignee, input.releaseId, input.createdBy])
+  return result.rows[0]
+}
+export async function updateFeature(id: number, patch: Record<string, unknown>) {
+  const columnMap: Record<string, string> = { title: 'title', description: 'description', status: 'status', priority: 'priority', assignee: 'assignee', releaseId: 'release_id' }
+  const setters: string[] = []
+  const values: unknown[] = [id]
+  for (const [key, column] of Object.entries(columnMap)) {
+    if (!(key in patch)) continue
+    setters.push(`${column} = $${values.length + 1}`)
+    values.push(patch[key])
+  }
+  if (!setters.length) return getFeature(id)
+  const rows = (await query<ProductFeatureRow>(`UPDATE product_feature SET ${setters.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, values)).rows
+  if (!rows[0]) return null
+  return (await attachFeatureIssues(rows))[0]
+}
+export async function deleteFeature(id: number) {
+  await query('DELETE FROM product_feature WHERE id = $1', [id])
+}
+export async function setFeatureIssues(featureId: number, items: Array<{ repository_id: number; issue_number: number; title: string; state: string; addedBy: number }>) {
+  await withTransaction(async (client) => {
+    await client.query('DELETE FROM feature_issue WHERE feature_id = $1', [featureId])
+    for (const item of items) {
+      await client.query('INSERT INTO feature_issue (feature_id, repository_id, issue_number, title, state, added_by) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (feature_id, repository_id, issue_number) DO UPDATE SET title = EXCLUDED.title, state = EXCLUDED.state', [featureId, item.repository_id, item.issue_number, item.title, item.state, item.addedBy])
+    }
+  })
+}
+export async function listReleases(productId: number) {
+  return (await query<ProductReleaseRow>('SELECT * FROM product_release WHERE product_id = $1 ORDER BY target_date ASC NULLS LAST, id DESC', [productId])).rows
+}
+export async function getRelease(id: number) {
+  return (await query<ProductReleaseRow>('SELECT * FROM product_release WHERE id = $1', [id])).rows[0] ?? null
+}
+export async function createRelease(input: { productId: number; name: string; description: string; targetDate: string | null; createdBy: number }) {
+  const result = await query<ProductReleaseRow>('INSERT INTO product_release (product_id, name, description, target_date, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING *', [input.productId, input.name, input.description, input.targetDate, input.createdBy])
+  return result.rows[0]
+}
+export async function updateRelease(id: number, patch: { name?: string; description?: string | null; targetDate?: string | null }) {
+  const setters: string[] = []
+  const values: unknown[] = [id]
+  if ('name' in patch) { setters.push(`name = $${values.length + 1}`); values.push(patch.name) }
+  if ('description' in patch) { setters.push(`description = $${values.length + 1}`); values.push(patch.description) }
+  if ('targetDate' in patch) { setters.push(`target_date = $${values.length + 1}`); values.push(patch.targetDate) }
+  if (!setters.length) return getRelease(id)
+  return (await query<ProductReleaseRow>(`UPDATE product_release SET ${setters.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, values)).rows[0] ?? null
+}
+export async function setReleaseStatus(id: number, status: string) {
+  return (await query<ProductReleaseRow>(`UPDATE product_release SET status = $2, released_at = CASE WHEN $2 = 'released' THEN COALESCE(released_at, now()) ELSE released_at END, updated_at = now() WHERE id = $1 RETURNING *`, [id, status])).rows[0] ?? null
+}
+export async function deleteRelease(id: number) {
+  await query('DELETE FROM product_release WHERE id = $1', [id])
+}

@@ -10,7 +10,7 @@ import { config } from './config.js'
 import { decryptSecret, encryptSecret, hashSecret } from './secret.js'
 import { giteaConfigured, initializeGiteaSettings, publicGiteaSettings, saveGiteaSettings } from './settings.js'
 import { initializeAdministrator, registerAdministratorRoutes, requireAdministrator } from './admin.js'
-import { createApiAccessToken, createBuild, createDoc, createProduct, createPrototype, deleteDoc, deleteProduct, deletePrototype, ensureStageConfiguration, findApiAccessToken, getBuild, getDoc, getGiteaAccessToken, getManagement, getStageConfiguration, listApiAccessTokens, listBuilds, listDocs, listProducts, listPrototypes, query, revokeApiAccessToken, saveGiteaAccessToken, touchApiAccessToken, updateBuildStatus, updateBuildLog, updateDoc, updateProduct, upsertRepository, upsertUser, withTransaction } from './db.js'
+import { createApiAccessToken, createBuild, createDoc, createFeature, createProduct, createPrototype, createRelease, deleteDoc, deleteFeature, deleteProduct, deletePrototype, deleteRelease, ensureStageConfiguration, findApiAccessToken, getBuild, getDoc, getFeature, getGiteaAccessToken, getManagement, getStageConfiguration, getRelease, listApiAccessTokens, listBuilds, listDocs, listFeatures, listProducts, listPrototypes, listReleases, query, revokeApiAccessToken, saveGiteaAccessToken, setFeatureIssues, setReleaseStatus, touchApiAccessToken, updateBuildStatus, updateBuildLog, updateDoc, updateFeature, updateProduct, updateRelease, upsertRepository, upsertUser, withTransaction } from './db.js'
 import { createComment, exchangeCode, getIssue, getRepository, getUser, giteaRequest, listComments, listIssues, listProjects, listRepositories, renderMarkdown, type GiteaIssue, type GiteaProject, type GiteaRepository } from './gitea.js'
 
 const app = Fastify({ logger: { redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-system-config-token"]'] } })
@@ -450,6 +450,190 @@ app.get<{ Params: { id: string } }>('/api/v1/builds/:id', async (request, reply)
   const build = await getBuild(Number(request.params.id))
   if (!build) return reply.code(404).send({ error: 'build_not_found' })
   return build
+})
+
+const featureStatuses = ['planned', 'designing', 'developing', 'released', 'deferred']
+const releaseStatuses = ['pending', 'ongoing', 'released', 'archived']
+
+async function writeAuthLog(auth: AuthContext, action: string, resource: string, payload: unknown) {
+  await query(`INSERT INTO audit_log (actor_gitea_user_id, actor_type, action, resource, payload) VALUES ($1, $2, $3, $4, $5)`, [auth.user.gitea_user_id, auth.actorType, action, resource, JSON.stringify(payload)])
+}
+
+async function buildFeatureIssueLinks(items: Array<{ owner?: string; repo?: string; number?: number }> | undefined, token: string, actorId: number) {
+  // 未传 issues 字段则表示保留原有关联；仅创建/更新显式传入时全量替换。
+  if (!Array.isArray(items)) return undefined
+  const repos = new Map<string, number>()
+  const result: Array<{ repository_id: number; issue_number: number; title: string; state: string; addedBy: number }> = []
+  for (const item of items.slice(0, 20)) {
+    const owner = String(item.owner ?? '').trim()
+    const repo = String(item.repo ?? '').trim()
+    const number = Number(item.number)
+    if (!owner || !repo || !Number.isInteger(number) || number <= 0) throw new Error('invalid_issue_link')
+    const key = `${owner}/${repo}`
+    if (!repos.has(key)) {
+      const remote = await getRepository(token, owner, repo)
+      const local = await upsertRepository({ id: remote.id, owner, name: remote.name, full_name: remote.full_name, html_url: remote.html_url })
+      repos.set(key, local.id)
+    }
+    const issue = await getIssue(token, owner, repo, number)
+    result.push({ repository_id: repos.get(key) as number, issue_number: number, title: issue.title ?? '', state: issue.state ?? 'open', addedBy: actorId })
+  }
+  return result
+}
+
+app.get<{ Params: { id: string } }>('/api/v1/products/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const productId = Number(request.params.id)
+  const [features, releases] = await Promise.all([listFeatures(productId), listReleases(productId)])
+  return { features: features, releases: releases }
+})
+
+app.get<{ Params: { id: string } }>('/api/v1/products/:id/overview', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const productId = Number(request.params.id)
+  const [featureCounts, issueStage, issueTotal, nextRelease, activity] = await Promise.all([
+    query<{ status: string; count: number }>('SELECT status, count(*)::int AS count FROM product_feature WHERE product_id = $1 GROUP BY status', [productId]),
+    query<{ stage: string; count: number }>(`SELECT COALESCE(m.stage, '未关联') AS stage, count(*)::int AS count FROM feature_issue fi JOIN product_feature f ON f.id = fi.feature_id LEFT JOIN issue_management m ON m.repository_id = fi.repository_id AND m.issue_number = fi.issue_number WHERE f.product_id = $1 GROUP BY 1`, [productId]),
+    query<{ count: number }>('SELECT count(*)::int AS count FROM feature_issue fi JOIN product_feature f ON f.id = fi.feature_id WHERE f.product_id = $1', [productId]),
+    query(`SELECT * FROM product_release WHERE product_id = $1 AND status = 'ongoing' ORDER BY target_date ASC NULLS LAST LIMIT 1`, [productId]),
+    query<{ action: string; resource: string; payload: unknown; created_at: string }>('SELECT action, resource, payload, created_at FROM audit_log WHERE resource LIKE $1 ORDER BY id DESC LIMIT 8', [`product/${productId}/%`]),
+  ])
+  const features: Record<string, number> = { planned: 0, designing: 0, developing: 0, released: 0, deferred: 0 }
+  for (const row of featureCounts.rows) features[row.status] = Number(row.count)
+  const byStage: Record<string, number> = {}
+  for (const row of issueStage.rows) byStage[row.stage] = Number(row.count)
+  return {
+    features,
+    issues: { total: Number(issueTotal.rows[0]?.count ?? 0), byStage },
+    nextRelease: nextRelease.rows[0] ?? null,
+    activity: activity.rows.map((row) => ({ action: row.action, resource: row.resource, payload: row.payload, created_at: row.created_at })),
+  }
+})
+
+app.get<{ Params: { id: string } }>('/api/v1/products/:id/features', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  return { items: await listFeatures(Number(request.params.id)) }
+})
+
+app.post<{ Params: { id: string }; Body: { title?: string; description?: string; status?: string; priority?: string; assignee?: string | null; releaseId?: number | null; issues?: Array<{ owner?: string; repo?: string; number?: number }> } }>('/api/v1/products/:id/features', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const productId = Number(request.params.id)
+  const title = request.body?.title?.trim()
+  if (!title) return reply.code(400).send({ error: 'feature_title_required', message: '请输入功能项标题' })
+  const status = featureStatuses.includes(request.body?.status ?? '') ? (request.body!.status as string) : 'planned'
+  const priority = ['P0', 'P1', 'P2', 'P3'].includes(request.body?.priority ?? '') ? (request.body!.priority as string) : 'P2'
+  const assignee = request.body?.assignee?.trim() || null
+  let releaseId: number | null = null
+  if (request.body?.releaseId != null) {
+    const release = await getRelease(Number(request.body.releaseId))
+    if (!release || release.product_id !== productId) return reply.code(400).send({ error: 'release_mismatch', message: '版本不存在或不属于该产品' })
+    releaseId = release.id
+  }
+  try {
+    const links = await buildFeatureIssueLinks(request.body?.issues, auth.token, auth.user.id)
+    const feature = await createFeature({ productId, title, description: request.body?.description ?? '', status, priority, assignee, releaseId, createdBy: auth.user.id })
+    if (links) await setFeatureIssues(feature.id, links)
+    await writeAuthLog(auth, 'create_feature', `product/${productId}/feature/${feature.id}`, { title })
+    return reply.code(201).send(await getFeature(feature.id))
+  } catch (error) {
+    if ((error as Error).message === 'invalid_issue_link') return reply.code(400).send({ error: 'invalid_issue_link', message: '关联 Issue 无效' })
+    throw error
+  }
+})
+
+app.put<{ Params: { id: string }; Body: { title?: string; description?: string; status?: string; priority?: string; assignee?: string | null; releaseId?: number | null; issues?: Array<{ owner?: string; repo?: string; number?: number }> } }>('/api/v1/features/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const existing = await getFeature(Number(request.params.id))
+  if (!existing) return reply.code(404).send({ error: 'feature_not_found' })
+  const body = request.body ?? {}
+  if (body.title !== undefined && !body.title.trim()) return reply.code(400).send({ error: 'feature_title_required', message: '请输入功能项标题' })
+  if (body.status !== undefined && !featureStatuses.includes(body.status)) return reply.code(400).send({ error: 'invalid_feature_status' })
+  if (body.priority !== undefined && !['P0', 'P1', 'P2', 'P3'].includes(body.priority)) return reply.code(400).send({ error: 'invalid_feature_priority' })
+  if (body.releaseId !== undefined && body.releaseId !== null) {
+    const release = await getRelease(Number(body.releaseId))
+    if (!release || release.product_id !== existing.product_id) return reply.code(400).send({ error: 'release_mismatch', message: '版本不存在或不属于该产品' })
+  }
+  try {
+    const links = await buildFeatureIssueLinks(body.issues, auth.token, auth.user.id)
+    const patch: Record<string, unknown> = {}
+    if (body.title !== undefined) patch.title = body.title.trim()
+    if (body.description !== undefined) patch.description = body.description
+    if (body.status !== undefined) patch.status = body.status
+    if (body.priority !== undefined) patch.priority = body.priority
+    if (body.assignee !== undefined) patch.assignee = body.assignee?.trim() || null
+    if (body.releaseId !== undefined) patch.releaseId = body.releaseId
+    const feature = await updateFeature(existing.id, patch)
+    if (links) await setFeatureIssues(existing.id, links)
+    await writeAuthLog(auth, 'update_feature', `product/${existing.product_id}/feature/${existing.id}`, { title: body.title?.trim() ?? existing.title, changes: Object.keys(patch) })
+    return feature
+  } catch (error) {
+    if ((error as Error).message === 'invalid_issue_link') return reply.code(400).send({ error: 'invalid_issue_link', message: '关联 Issue 无效' })
+    throw error
+  }
+})
+
+app.delete<{ Params: { id: string } }>('/api/v1/features/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const existing = await getFeature(Number(request.params.id))
+  if (!existing) return reply.code(404).send({ error: 'feature_not_found' })
+  await deleteFeature(existing.id)
+  await writeAuthLog(auth, 'delete_feature', `product/${existing.product_id}/feature/${existing.id}`, { title: existing.title })
+  return { ok: true }
+})
+
+app.get<{ Params: { id: string } }>('/api/v1/products/:id/releases', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  return { items: await listReleases(Number(request.params.id)) }
+})
+
+app.post<{ Params: { id: string }; Body: { name?: string; description?: string; targetDate?: string } }>('/api/v1/products/:id/releases', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const name = request.body?.name?.trim()
+  if (!name) return reply.code(400).send({ error: 'release_name_required', message: '请输入版本名称' })
+  const release = await createRelease({ productId: Number(request.params.id), name, description: request.body?.description ?? '', targetDate: request.body?.targetDate || null, createdBy: auth.user.id })
+  await writeAuthLog(auth, 'create_release', `product/${release.product_id}/release/${release.id}`, { name })
+  return reply.code(201).send(release)
+})
+
+app.put<{ Params: { id: string }; Body: { name?: string; description?: string; targetDate?: string } }>('/api/v1/releases/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const existing = await getRelease(Number(request.params.id))
+  if (!existing) return reply.code(404).send({ error: 'release_not_found' })
+  if (request.body?.name !== undefined && !request.body.name.trim()) return reply.code(400).send({ error: 'release_name_required', message: '请输入版本名称' })
+  const patch: { name?: string; description?: string | null; targetDate?: string | null } = {}
+  if (request.body?.name !== undefined) patch.name = request.body.name.trim()
+  if (request.body?.description !== undefined) patch.description = request.body.description
+  if (request.body?.targetDate !== undefined) patch.targetDate = request.body.targetDate || null
+  const release = await updateRelease(existing.id, patch)
+  await writeAuthLog(auth, 'update_release', `product/${existing.product_id}/release/${existing.id}`, { name: release?.name ?? existing.name, changes: Object.keys(patch) })
+  return release
+})
+
+app.post<{ Params: { id: string }; Body: { status?: string } }>('/api/v1/releases/:id/status', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const status = request.body?.status
+  if (!status || !releaseStatuses.includes(status)) return reply.code(400).send({ error: 'invalid_release_status' })
+  const release = await setReleaseStatus(Number(request.params.id), status)
+  if (!release) return reply.code(404).send({ error: 'release_not_found' })
+  await writeAuthLog(auth, 'release_status', `product/${release.product_id}/release/${release.id}`, { name: release.name, status })
+  return release
+})
+
+app.delete<{ Params: { id: string } }>('/api/v1/releases/:id', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const existing = await getRelease(Number(request.params.id))
+  if (!existing) return reply.code(404).send({ error: 'release_not_found' })
+  await deleteRelease(existing.id)
+  await writeAuthLog(auth, 'delete_release', `product/${existing.product_id}/release/${existing.id}`, { name: existing.name })
+  return { ok: true }
+})
+
+app.get<{ Querystring: { q?: string } }>('/api/v1/issue-search', async (request, reply) => {
+  const auth = await authenticate(request, reply); if (!auth) return
+  const keyword = String(request.query.q ?? '').trim()
+  if (!keyword) return { items: [] }
+  const results = await giteaRequest<Array<{ number: number; title: string; state: string; repository?: { full_name?: string; owner?: { login?: string }; name?: string } }>>(`/repos/issues/search?q=${encodeURIComponent(keyword)}&type=issues&limit=20&state=open`, auth.token)
+  return { items: results.map((item) => ({ owner: item.repository?.owner?.login ?? item.repository?.full_name?.split('/')[0] ?? '', repo: item.repository?.name ?? item.repository?.full_name?.split('/')[1] ?? '', number: item.number, title: item.title, state: item.state })).filter((item) => item.owner && item.repo) }
 })
 
 app.post<{ Body: { body?: string } }>('/api/v1/markdown', async (request, reply) => {

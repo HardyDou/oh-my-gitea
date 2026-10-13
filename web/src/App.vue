@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import GiteaSettings from './GiteaSettings.vue'
 import { ArrowLeft, Bell, Box, Calendar, Connection, Grid, House, Monitor, Moon, Setting, Sunny, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
-import { addIssueComment, batchUpdateManagement, createApiAccessToken, createBuild, createDoc, createProduct, createPrototype, deleteDoc, deleteProduct, deletePrototype, getApiAccessTokens, getBuild, getDocDetail, getDocs, getIssueDetail, getIssues, getMe, getProducts, getPrototypes, getRepositories, getStageConfig, renderMarkdown, revokeApiAccessToken, saveStageConfig, updateAssignee, updateDoc, updateIssueDueDate, updateManagement, updateProduct, uploadIssueAttachment, type ApiAccessToken, type AppUser, type GiteaComment, type GiteaIssue, type GiteaRepository, type Product, type ProductDoc, type ProductDocSummary, type Prototype, type StageConfig } from './api'
+import { addIssueComment, batchUpdateManagement, createApiAccessToken, createBuild, createDoc, createFeature, createProduct, createPrototype, createRelease, deleteDoc, deleteFeature, deleteProduct, deletePrototype, deleteRelease, getApiAccessTokens, getBuild, getDocDetail, getDocs, getProduct, getIssueDetail, getIssues, getMe, getProductOverview, getProducts, getPrototypes, getRepositories, getReleases, getStageConfig, renderMarkdown, revokeApiAccessToken, saveStageConfig, searchIssues, setReleaseStatus, updateAssignee, updateDoc, updateFeature, updateIssueDueDate, updateManagement, updateProduct, updateRelease, uploadIssueAttachment, type ApiAccessToken, type AppUser, type FeatureStatus, type FeaturePayload, type GiteaComment, type GiteaIssue, type GiteaRepository, type LinkedFeatureIssue, type Product, type ProductDoc, type ProductDocSummary, type ProductFeature, type ProductOverview, type ProductRelease, type Prototype, type ReleaseStatus, type StageConfig } from './api'
 
 type Stage = string
 type Theme = 'light' | 'dark' | 'auto'
@@ -103,7 +103,7 @@ const productLoading = ref(false)
 const productDialogVisible = ref(false)
 const productForm = ref({ name: '', description: '' })
 const productEditing = ref<Product | null>(null)
-const productTab = ref<'docs' | 'prototypes'>('docs')
+const productTab = ref<'overview' | 'features' | 'releases' | 'docs' | 'prototypes'>('overview')
 const productDocs = ref<ProductDocSummary[]>([])
 const currentDoc = ref<ProductDoc | null>(null)
 const docDraft = ref({ title: '', content: '' })
@@ -498,16 +498,24 @@ async function removeProduct(product: Product) {
 async function selectProduct(product: Product | null) {
   if (selectedProduct.value?.id !== product?.id && !(await confirmLeaveDoc())) return
   selectedProduct.value = product
-  productTab.value = 'docs'
+  productTab.value = 'overview'
   currentDoc.value = null
+  featureDrawerVisible.value = false
+  releaseDialogVisible.value = false
   prototypeViewingBuild.value = null
+  productFeatures.value = []
+  productReleases.value = []
+  productOverview.value = null
   stopBuildPolling()
   if (!product) return
   productLoading.value = true
   try {
-    const [docs, prototypes] = await Promise.all([getDocs(product.id), getPrototypes(product.id)])
+    const [docs, prototypes, productData] = await Promise.all([getDocs(product.id), getPrototypes(product.id), getProduct(product.id)])
     productDocs.value = docs.items
     productPrototypes.value = prototypes.items
+    productFeatures.value = productData.features
+    productReleases.value = productData.releases
+    void refreshProductOverview()
     if (prototypes.items.some((item) => item.builds.some((build) => build.status === 'pending' || build.status === 'building'))) startBuildPolling()
   } catch (error) { ElMessage.error((error as Error).message || '产品数据加载失败') } finally { productLoading.value = false }
 }
@@ -597,6 +605,183 @@ const buildStatusMap = { pending: { text: '排队中', color: '#9aa4b5' }, build
 function statusColor(status: PrototypeBuild['status']) { return buildStatusMap[status].color }
 function statusText(status: PrototypeBuild['status']) { return buildStatusMap[status].text }
 const totalBuilds = computed(() => productPrototypes.value.reduce((count, prototype) => count + prototype.builds.length, 0))
+const productFeatures = ref<ProductFeature[]>([])
+const productReleases = ref<ProductRelease[]>([])
+const productOverview = ref<ProductOverview | null>(null)
+const featureStatusFilter = ref('全部')
+const featureReleaseFilter = ref('全部')
+const productFeatureFiltered = computed(() => productFeatures.value.filter((feature) => (featureStatusFilter.value === '全部' || feature.status === featureStatusFilter.value) && (featureReleaseFilter.value === '全部' || (featureReleaseFilter.value === '未排期' ? !feature.release_id : String(feature.release_id) === featureReleaseFilter.value))))
+const featureDrawerVisible = ref(false)
+const featureEditing = ref<ProductFeature | null>(null)
+const featureForm = ref<{ title: string; description: string; priority: string; status: FeatureStatus; assignee: string; releaseId: number; issues: Array<{ owner: string; repo: string; number: number; title: string; state: string }> }>({ title: '', description: '', priority: 'P2', status: 'planned', assignee: '', releaseId: 0, issues: [] })
+const featureDescHtml = ref('')
+const featureDescMode = ref<'write' | 'preview'>('write')
+const featureSaving = ref(false)
+const issueSearchKeyword = ref('')
+const issueSearchResults = ref<Array<{ owner: string; repo: string; number: number; title: string; state: string }>>([])
+const issueSearchLoading = ref(false)
+const releaseDialogVisible = ref(false)
+const releaseEditing = ref<ProductRelease | null>(null)
+const releaseForm = ref({ name: '', description: '', targetDate: '' })
+const releaseSaving = ref(false)
+const featureStatusMap = { planned: { text: '规划中', color: '#8e99a6' }, designing: { text: '设计中', color: '#3971d3' }, developing: { text: '研发中', color: '#e79629' }, released: { text: '已发布', color: '#27a476' }, deferred: { text: '暂缓', color: '#6b7280' } } as const
+const releaseStatusMap = { pending: { text: '未开始', color: '#8e99a6' }, ongoing: { text: '进行中', color: '#e79629' }, released: { text: '已发布', color: '#27a476' }, archived: { text: '归档', color: '#6b7280' } } as const
+const featurePriorityColorMap: Record<string, string> = { P0: '#e5544b', P1: '#e79629', P2: '#3583ed', P3: '#8e99a6' }
+const stageBarColors = ['#4f7cff', '#27a476', '#e79629', '#8a56d6', '#2fb0a9', '#6b7a90', '#d9534f', '#7b6cd9', '#c8ccd4']
+function featureStatusText(status: FeatureStatus) { return featureStatusMap[status]?.text ?? status }
+function featureStatusColor(status: FeatureStatus) { return featureStatusMap[status]?.color ?? '#8e99a6' }
+function releaseStatusText(status: ReleaseStatus) { return releaseStatusMap[status]?.text ?? status }
+function releaseStatusColor(status: ReleaseStatus) { return releaseStatusMap[status]?.color ?? '#8e99a6' }
+function featureReleaseName(releaseId: number | null) { if (!releaseId) return '未排期'; return productReleases.value.find((release) => release.id === releaseId)?.name ?? '未排期' }
+function releaseFeatureTotals(release: ProductRelease) { const list = productFeatures.value.filter((feature) => feature.release_id === release.id); return { total: list.length, done: list.filter((feature) => feature.status === 'released').length } }
+function formatIssueState(state: string) {
+  return state === 'closed' ? '已关闭' : '开放'
+}
+function tomorrowDays(targetDate: string | null) {
+  if (!targetDate) return null
+  const target = new Date(`${targetDate}T23:59:59`)
+  const diff = Math.ceil((target.getTime() - Date.now()) / 86400000)
+  return diff
+}
+const overviewFeatureSegments = computed(() => {
+  const counts = productOverview.value?.features
+  if (!counts) return []
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0)
+  return (Object.entries(featureStatusMap) as Array<[FeatureStatus, { text: string; color: string }]>).filter(([status]) => (counts as Record<string, number>)[status] > 0).map(([status, meta]) => ({ key: status, text: meta.text, count: (counts as Record<string, number>)[status], pct: total ? ((counts as Record<string, number>)[status] / total) * 100 : 0, color: meta.color }))
+})
+const overviewStageSegments = computed(() => {
+  const byStage = productOverview.value?.issues?.byStage
+  const total = productOverview.value?.issues?.total ?? 0
+  if (!byStage || !total) return []
+  const names: string[] = [...stages.value.filter((name) => byStage[name]), ...Object.keys(byStage).filter((name) => !stages.value.includes(name))]
+  return names.map((name, index) => ({ name, count: byStage[name], pct: (byStage[name] / total) * 100, color: stageBarColors[index % stageBarColors.length] }))
+})
+function overviewActivityText(row: { action: string; payload: any }) {
+  const title = row.payload?.title ?? row.payload?.name ?? ''
+  const map: Record<string, string> = { create_feature: `新建功能「${title}」`, update_feature: `修改功能「${title}」`, delete_feature: `删除功能「${title}」`, create_release: `新建版本「${title}」`, update_release: `修改版本「${title}」`, release_status: `版本「${title}」状态调整`, delete_release: `删除版本「${title}」`, create_product: '创建产品', update_product: '修改产品信息', delete_product: '删除产品' }
+  return map[row.action] ?? row.action
+}
+async function openFeatureDrawer(feature: ProductFeature | null) {
+  featureEditing.value = feature ? { ...feature, issues: feature.issues.map((issue) => ({ ...issue })) } : null
+  featureForm.value = {
+    title: feature?.title ?? '',
+    description: feature?.description ?? '',
+    priority: feature?.priority ?? 'P2',
+    status: feature?.status ?? 'planned',
+    assignee: feature?.assignee ?? '',
+    releaseId: feature?.release_id ?? 0,
+    issues: feature ? feature.issues.map((issue) => ({ owner: issue.owner, repo: issue.name, number: issue.number, title: issue.title, state: issue.state })) : [],
+  }
+  featureDescHtml.value = ''
+  featureDescMode.value = 'write'
+  featureDrawerVisible.value = true
+}
+async function featureDescPreview() {
+  if (featureDescMode.value === 'preview') { featureDescMode.value = 'write'; return }
+  try { featureDescHtml.value = (await renderMarkdown(featureForm.value.description)).html; featureDescMode.value = 'preview' } catch (error) { ElMessage.error((error as Error).message || '预览失败') }
+}
+async function doIssueSearch() {
+  const keyword = issueSearchKeyword.value.trim()
+  if (!keyword) { ElMessage.warning('请输入关键词搜索 Issue'); return }
+  issueSearchLoading.value = true
+  try { issueSearchResults.value = (await searchIssues(keyword)).items } catch (error) { ElMessage.error((error as Error).message || 'Issue 搜索失败') } finally { issueSearchLoading.value = false }
+}
+function addFeatureIssue(issue: { owner: string; repo: string; number: number; title: string; state: string }) {
+  if (featureForm.value.issues.some((item) => item.owner === issue.owner && item.repo === issue.repo && item.number === issue.number)) return
+  featureForm.value.issues.push({ ...issue })
+}
+function removeFeatureIssue(index: number) { featureForm.value.issues.splice(index, 1) }
+function featureDirty() {
+  const editing = featureEditing.value
+  if (!editing) return featureForm.value.title.trim() !== '' || featureForm.value.description !== ''
+  const issueKey = (list: any) => list.map((item: any) => `${item.owner}/${item.repo}/${item.number}`).join('|')
+  return featureForm.value.title !== editing.title || featureForm.value.description !== editing.description || featureForm.value.priority !== editing.priority || featureForm.value.status !== editing.status || (featureForm.value.assignee || '') !== (editing.assignee ?? '') || featureForm.value.releaseId !== (editing.release_id ?? 0) || featureForm.value.issues.map((item) => ({ owner: item.owner, repo: item.repo, number: item.number, title: item.title, state: item.state })).some((item, index) => { const original = editing.issues[index]; return !original || original.owner !== item.owner || original.name !== item.repo || original.number !== item.number }) || issueKey(editing.issues) !== issueKey(featureForm.value.issues.map((item) => ({ owner: item.owner, name: item.repo, number: item.number })))
+}
+async function beforeFeatureDrawerClosed(done: (cancel?: boolean) => void) {
+  try {
+    if (featureDirty()) await ElMessageBox.confirm('功能项有未保存的修改，确定关闭吗？', '未保存的修改', { type: 'warning', confirmButtonText: '关闭', cancelButtonText: '继续编辑' })
+    done()
+  } catch { /* stays open */ }
+}
+async function saveFeatureForm() {
+  const title = featureForm.value.title.trim()
+  if (!title) { ElMessage.warning('请输入功能项标题'); return }
+  featureSaving.value = true
+  const payload: FeaturePayload = {
+    title,
+    description: featureForm.value.description,
+    status: featureForm.value.status,
+    priority: featureForm.value.priority,
+    assignee: featureForm.value.assignee.trim() || null,
+    releaseId: featureForm.value.releaseId || null,
+    issues: featureForm.value.issues.map((issue) => ({ owner: issue.owner, repo: issue.repo, number: issue.number })),
+  }
+  try {
+    if (featureEditing.value) await updateFeature(featureEditing.value.id, payload)
+    else await createFeature(selectedProduct.value!.id, payload)
+    featureDrawerVisible.value = false
+    ElMessage.success('功能项已保存')
+    await reloadProductFeatures()
+  } catch (error) { ElMessage.error((error as Error).message || '功能项保存失败') } finally { featureSaving.value = false }
+}
+async function reloadProductFeatures() {
+  if (!selectedProduct.value) return
+  try {
+    const data = await getProduct(selectedProduct.value.id)
+    productFeatures.value = data.features
+    productReleases.value = data.releases
+    void refreshProductOverview()
+  } catch { /* 忽略刷新错误 */ }
+}
+async function removeFeatureEditor() {
+  const editing = featureEditing.value
+  if (!editing) return
+  try {
+    await ElMessageBox.confirm(`确定删除功能项「${editing.title}」吗？关联 Issue 不会被删除。`, '删除功能项', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    await deleteFeature(editing.id)
+    featureDrawerVisible.value = false
+    ElMessage.success('功能项已删除')
+    await reloadProductFeatures()
+  } catch (error) { if ((error as Error).message !== 'cancel') ElMessage.error((error as Error).message || '功能项删除失败') }
+}
+async function quickFeatureUpdate(feature: ProductFeature, patch: { status?: FeatureStatus; priority?: string }) {
+  try { await updateFeature(feature.id, patch); productFeatures.value = productFeatures.value.map((item) => item.id === feature.id ? { ...item, ...patch, issues: item.issues } : item); void refreshProductOverview(); ElMessage.success('已更新') } catch (error) { ElMessage.error((error as Error).message || '更新失败') }
+}
+function openReleaseDialog(release: ProductRelease | null) {
+  releaseEditing.value = release
+  releaseForm.value = { name: release?.name ?? '', description: release?.description ?? '', targetDate: release?.target_date ?? '' }
+  releaseDialogVisible.value = true
+}
+async function saveReleaseForm() {
+  const name = releaseForm.value.name.trim()
+  if (!name) { ElMessage.warning('请输入版本名称'); return }
+  releaseSaving.value = true
+  try {
+    const data = { name, description: releaseForm.value.description, targetDate: releaseForm.value.targetDate || null }
+    if (releaseEditing.value) await updateRelease(releaseEditing.value.id, data)
+    else await createRelease(selectedProduct.value!.id, data)
+    releaseDialogVisible.value = false
+    ElMessage.success('版本已保存')
+    await reloadProductFeatures()
+  } catch (error) { ElMessage.error((error as Error).message || '版本保存失败') } finally { releaseSaving.value = false }
+}
+async function changeReleaseStatus(release: ProductRelease, status: ReleaseStatus) {
+  const actionText = status === 'released' ? `发布版本「${release.name}」` : `归档版本「${release.name}」`
+  try {
+    await ElMessageBox.confirm(`${actionText}？已发布/归档后不可回到进行中。`, '确认操作', { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' })
+    await setReleaseStatus(release.id, status)
+    ElMessage.success('版本状态已更新')
+    await reloadProductFeatures()
+  } catch (error) { if ((error as Error).message !== 'cancel') ElMessage.error((error as Error).message || '版本状态更新失败') }
+}
+async function removeRelease(release: ProductRelease) {
+  try {
+    await ElMessageBox.confirm(`确定删除版本「${release.name}」吗？其下功能项会变为未排期。`, '删除版本', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    await deleteRelease(release.id)
+    ElMessage.success('版本已删除')
+    await reloadProductFeatures()
+  } catch (error) { if ((error as Error).message !== 'cancel') ElMessage.error((error as Error).message || '版本删除失败') }
+}
 async function refreshBuilds() {
   if (!selectedProduct.value) return
   const previous = productPrototypes.value
@@ -607,6 +792,10 @@ async function refreshBuilds() {
   }
   const hasActiveBuild = productPrototypes.value.some((prototype) => prototype.builds.some((build) => build.status === 'pending' || build.status === 'building'))
   if (!hasActiveBuild) stopBuildPolling()
+}
+async function refreshProductOverview() {
+  if (!selectedProduct.value) return
+  try { productOverview.value = await getProductOverview(selectedProduct.value.id) } catch { /* 忽略概览刷新错误 */ }
 }
 function startBuildPolling() {
   if (!buildPollTimer) buildPollTimer = setInterval(refreshBuilds, 5000)
@@ -773,8 +962,71 @@ onMounted(initializePage)
                 <div class="products-crumb"><button class="crumb-link" @click="selectProduct(null)">产品管理</button><span>/</span><strong>{{ selectedProduct.name }}</strong></div>
                 <div class="products-detail-layout">
                   <section class="products-main">
-                    <el-radio-group v-model="productTab" class="products-tabs"><el-radio-button value="docs">文档（{{ productDocs.length }}）</el-radio-button><el-radio-button value="prototypes">原型（{{ productPrototypes.length }}）</el-radio-button></el-radio-group>
-                    <template v-if="productTab === 'docs'">
+                    <el-radio-group v-model="productTab" class="products-tabs"><el-radio-button value="overview">概览</el-radio-button><el-radio-button value="features">功能（{{ productFeatures.length }}）</el-radio-button><el-radio-button value="releases">版本（{{ productReleases.length }}）</el-radio-button><el-radio-button value="docs">文档（{{ productDocs.length }}）</el-radio-button><el-radio-button value="prototypes">原型（{{ productPrototypes.length }}）</el-radio-button></el-radio-group>
+                    <template v-if="productTab === 'overview'">
+                      <div class="overview-grid">
+                        <div class="panel-box overview-box">
+                          <h3>功能项状态</h3>
+                          <template v-if="productOverview">
+                            <div class="ov-large">{{ Object.entries(productOverview.features).reduce((s, [, n]) => s + Number(n), 0) }}</div>
+                            <div class="stage-bar"><span v-for="segment in overviewFeatureSegments" :key="segment.key" class="stage-bar-seg" :style="{ width: `${segment.pct}%`, background: segment.color }" /><span v-if="!overviewFeatureSegments.length" class="stage-bar-seg" style="width:100%; background: #2b3138;" /></div>
+                            <div class="stage-bar-legend"><span v-for="segment in overviewFeatureSegments" :key="`l-${segment.key}`" class="stage-legend"><i :style="{ background: segment.color }" />{{ segment.text }} {{ segment.count }}</span><span v-if="!overviewFeatureSegments.length" class="stage-legend muted">暂无功能项</span></div>
+                          </template>
+                          <el-skeleton v-else :rows="2" animated />
+                        </div>
+                        <div class="panel-box overview-box">
+                          <h3>下一版本</h3>
+                          <template v-if="productOverview?.nextRelease">
+                            <div class="ov-release-name"><strong>{{ productOverview.nextRelease.name }}</strong><i class="release-pill" :style="{ color: releaseStatusColor(productOverview.nextRelease.status), background: `${releaseStatusColor(productOverview.nextRelease.status)}1c` }">{{ releaseStatusText(productOverview.nextRelease.status) }}</i></div>
+                            <div class="muted">目标 {{ productOverview.nextRelease.target_date ?? '未设置' }}</div>
+                            <div v-if="tomorrowDays(productOverview.nextRelease.target_date) !== null" class="ov-countdown" :class="{ overdue: (tomorrowDays(productOverview.nextRelease.target_date) ?? 0) < 0 }">{{ (tomorrowDays(productOverview.nextRelease.target_date) ?? 0) < 0 ? `已过期 ${Math.abs(tomorrowDays(productOverview.nextRelease.target_date) ?? 0)} 天` : `还有 ${tomorrowDays(productOverview.nextRelease.target_date)} 天` }}</div>
+                          </template>
+                          <span v-else class="muted">暂无进行中的版本</span>
+                        </div>
+                        <div class="panel-box overview-box">
+                          <h3>关联 Issue 阶段分布</h3>
+                          <template v-if="overviewStageSegments.length">
+                            <div class="stage-bar"><span v-for="segment in overviewStageSegments" :key="segment.name" class="stage-bar-seg" :style="{ width: `${segment.pct}%`, background: segment.color }" /></div>
+                            <div class="stage-bar-legend"><span v-for="segment in overviewStageSegments" :key="`l-${segment.name}`" class="stage-legend"><i :style="{ background: segment.color }" />{{ segment.name }} {{ segment.count }}</span></div>
+                          </template>
+                          <span v-else class="muted">功能项尚未关联 Issue</span>
+                        </div>
+                        <div class="panel-box overview-box overview-activity">
+                          <h3>最近动态</h3>
+                          <template v-if="productOverview?.activity?.length">
+                            <div v-for="row in productOverview.activity" :key="row.resource + row.created_at" class="activity-row"><span class="activity-text">{{ overviewActivityText(row) }}</span><small>{{ formatDate(row.created_at) }}</small></div>
+                          </template>
+                          <span v-else class="muted">暂无动态</span>
+                        </div>
+                      </div>
+                    </template>
+                    <template v-else-if="productTab === 'features'">
+                      <div class="feature-toolbar"><el-select v-model="featureStatusFilter" class="feature-filter" size="small"><el-option value="全部" label="全部状态" /><el-option v-for="(meta, status) in featureStatusMap" :key="status" :value="status" :label="meta.text" /></el-select><el-select v-model="featureReleaseFilter" class="feature-filter" size="small"><el-option value="全部" label="全部版本" /><el-option v-for="release in productReleases" :key="release.id" :value="String(release.id)" :label="release.name" /><el-option value="未排期" label="未排期" /></el-select><el-button size="small" type="primary" plain @click="openFeatureDrawer(null)">＋新建功能项</el-button></div>
+                      <el-table :data="productFeatureFiltered" class="feature-table" size="small" empty-text="暂无功能项" @row-click="(row: ProductFeature) => openFeatureDrawer(row)">
+                        <el-table-column label="状态" width="120"><template #default="scope"><el-popover placement="bottom" :width="150" trigger="click"><template #reference><button class="status-pill" :style="{ color: featureStatusColor(scope.row.status), background: `${featureStatusColor(scope.row.status)}1c` }" @click.stop><i class="status-dot" :style="{ background: featureStatusColor(scope.row.status) }" />{{ featureStatusText(scope.row.status) }}</button></template><button v-for="(meta, status) in featureStatusMap" :key="status" class="popup-option" :class="{ selected: status === scope.row.status }" @click.stop="quickFeatureUpdate(scope.row, { status: status as FeatureStatus })">{{ meta.text }}</button></el-popover></template></el-table-column>
+                        <el-table-column label="标题" min-width="220"><template #default="scope"><span class="feature-title-cell">{{ scope.row.title }}</span><span v-if="scope.row.issues.length" class="feature-link-count">· {{ scope.row.issues.length }} 个 Issue</span></template></el-table-column>
+                        <el-table-column label="优先级" width="90"><template #default="scope"><el-popover placement="bottom" :width="100" trigger="click"><template #reference><button class="feature-priority" :style="{ color: featurePriorityColorMap[scope.row.priority] }" @click.stop>{{ scope.row.priority }}</button></template><button v-for="priority in ['P0', 'P1', 'P2', 'P3']" :key="priority" class="popup-option" :class="{ selected: priority === scope.row.priority }" @click.stop="quickFeatureUpdate(scope.row, { priority })">{{ priority }}</button></el-popover></template></el-table-column>
+                        <el-table-column label="负责人" width="100"><template #default="scope"><span>{{ scope.row.assignee || '—' }}</span></template></el-table-column>
+                        <el-table-column label="版本" width="120"><template #default="scope"><span>{{ featureReleaseName(scope.row.release_id) }}</span></template></el-table-column>
+                        <el-table-column label="更新时间" width="130"><template #default="scope"><span class="muted">{{ formatDate(scope.row.updated_at) }}</span></template></el-table-column>
+                      </el-table>
+                    </template>
+                    <template v-else-if="productTab === 'releases'">
+                      <div class="feature-toolbar"><el-button size="small" type="primary" plain @click="openReleaseDialog(null)">＋新建版本</el-button></div>
+                      <div class="release-grid"><section v-for="release in productReleases" :key="release.id" class="panel-box release-card">
+                        <div class="release-head"><strong>{{ release.name }}</strong><i class="release-pill" :style="{ color: releaseStatusColor(release.status), background: `${releaseStatusColor(release.status)}1c` }">{{ releaseStatusText(release.status) }}</i></div>
+                        <div class="release-meta"><span>目标 {{ release.target_date || '未设置' }}</span><span>{{ release.name }} · 功能 {{ releaseFeatureTotals(release).done }}/{{ releaseFeatureTotals(release).total }}</span></div>
+                        <div class="release-progress"><div class="release-progress-bar" :style="`width:${releaseFeatureTotals(release).total ? Math.round(releaseFeatureTotals(release).done / releaseFeatureTotals(release).total * 100) : 0}%`" /></div>
+                        <div class="release-card-actions">
+                          <el-button size="small" plain @click="openReleaseDialog(release)">编辑</el-button>
+                          <el-button v-if="release.status === 'pending' || release.status === 'ongoing'" size="small" type="success" plain @click="changeReleaseStatus(release, 'released')">发布</el-button>
+                          <el-button v-if="release.status === 'released'" size="small" plain @click="changeReleaseStatus(release, 'archived')">归档</el-button>
+                          <el-button size="small" type="danger" plain @click="removeRelease(release)">删除</el-button>
+                        </div>
+                      </section></div>
+                      <el-empty v-if="!productReleases.length" description="尚未创建版本" :image-size="55" />
+                    </template>
+                    <template v-else-if="productTab === 'docs'">
                       <div v-if="!currentDoc" class="panel-box doc-list-panel">
                         <div class="panel-head"><strong>文档（{{ productDocs.length }}）</strong><el-button size="small" text type="primary" @click="newDoc">＋新建</el-button></div>
                         <div class="doc-list-rows"><div v-for="doc in productDocs" :key="doc.id" class="doc-row" @click="openDoc(doc)"><strong class="doc-row-title">{{ doc.title }}</strong><span class="doc-row-time">更新于 {{ formatDate(doc.updated_at) }}</span><span class="doc-row-action" @click.stop><el-button link type="danger" @click="removeDoc(doc)">删除</el-button></span></div></div>
@@ -789,7 +1041,7 @@ onMounted(initializePage)
                         </div>
                       </section>
                     </template>
-                    <template v-else>
+                    <template v-else-if="productTab === 'prototypes'">
                       <div class="panel-box prototype-add"><el-input v-model="prototypeRepoInput" placeholder="Gitea 仓库地址或 owner/repo" style="max-width: 360px" /><el-button type="primary" plain @click="addPrototype">添加原型仓库</el-button></div>
                       <section v-for="prototype in productPrototypes" :key="prototype.id" class="panel-box prototype-card">
                         <div class="prototype-head"><span class="repo-mark"><el-icon><Box /></el-icon></span><strong>{{ prototype.repository_full_name }}</strong><el-button link type="danger" @click="removePrototype(prototype)">移除</el-button></div>
@@ -813,9 +1065,13 @@ onMounted(initializePage)
                     </div>
                     <div class="panel-box">
                       <h3>概览</h3>
+                      <div class="side-row"><span>功能项</span><b>{{ productFeatures.length }}</b></div>
+                      <div class="side-row"><span>原型仓库</span><b>{{ productPrototypes.length }}</b></div>
                       <div class="side-row"><span>文档</span><b>{{ productDocs.length }}</b></div>
                       <div class="side-row"><span>原型仓库</span><b>{{ productPrototypes.length }}</b></div>
                       <div class="side-row"><span>构建版本</span><b>{{ totalBuilds }}</b></div>
+                      <div class="side-row"><span>功能项</span><b>{{ productFeatures.length }}</b></div>
+                      <div class="side-row"><span>进行中版本</span><b>{{ productReleases.filter(r => r.status === 'ongoing').length }}</b></div>
                     </div>
                   </aside>
                 </div>
@@ -857,6 +1113,42 @@ onMounted(initializePage)
               <el-form-item label="状态"><el-select v-model="batchSubStageCode" style="width: 100%"><el-option v-for="substage in batchSubstages" :key="substage.code" :label="substage.name" :value="substage.code" /></el-select></el-form-item>
             </el-form>
             <template #footer><el-button @click="batchDialogVisible = false">取消</el-button><el-button type="primary" :loading="batchSaving" @click="saveBatchManagement">确认修改</el-button></template>
+          </el-dialog>
+          <el-drawer v-model="featureDrawerVisible" :title="featureEditing ? `編輯功能项` : '新建功能项'" size="460px" destroy-on-close :before-close="beforeFeatureDrawerClosed">
+            <div class="feature-form">
+              <label>标题</label><el-input v-model="featureForm.title" placeholder="一句话说明这个功能" />
+              <label>状态</label><el-select v-model="featureForm.status" style="width: 100%"><el-option v-for="(meta, status) in featureStatusMap" :key="status" :value="status" :label="meta.text" /></el-select>
+              <label>优先级</label><el-select v-model="featureForm.priority" style="width: 100%"><el-option v-for="priority in ['P0','P1','P2','P3']" :key="priority" :value="priority" :label="priority" /></el-select>
+              <label>负责人（Gitea 用户名）</label><el-input v-model="featureForm.assignee" placeholder="例如 douxy" />
+              <label>所属版本</label><el-select v-model="featureForm.releaseId" style="width: 100%"><el-option :value="0" label="未排期" /><el-option v-for="release in productReleases" :key="release.id" :value="release.id" :label="release.name" /></el-select>
+              <label>关联 Issue</label>
+              <div class="link-issue-bar"><el-input v-model="issueSearchKeyword" placeholder="全局搜索 Issue 标题或关键词" size="small" @keyup.enter="doIssueSearch" /><el-button size="small" plain :loading="issueSearchLoading" @click="doIssueSearch">搜索</el-button></div>
+              <div v-if="issueSearchResults.length" class="issue-search-list">
+                <div v-for="issue in issueSearchResults.slice(0, 6)" :key="`${issue.owner}/${issue.repo}/${issue.number}`" class="issue-search-row" @click="addFeatureIssue(issue)"><span>#{{ issue.number }} {{ issue.title }}</span><small>{{ issue.owner }}/{{ issue.repo }}</small><el-tag size="small" effect="plain">＋</el-tag></div>
+              </div>
+              <div class="linked-issue-list">
+                <div v-for="(issue, index) in featureForm.issues" :key="`${issue.owner}/${issue.repo}/${issue.number}`" class="linked-issue-row"><span>#{{ issue.number }} {{ issue.title }}</span><small>{{ issue.owner }}/{{ issue.repo }}</small><el-tag size="small" :type="issue.state === 'closed' ? 'info' : 'primary'" effect="plain">{{ formatIssueState(issue.state) }}</el-tag><el-button link type="danger" @click="removeFeatureIssue(index)">×</el-button></div>
+                <span v-if="!featureForm.issues.length" class="muted">暂未关联 Issue（可选）</span>
+              </div>
+              <label>描述</label>
+              <div class="feature-desc-tabs"><button :class="{ active: featureDescMode === 'write' }" @click="featureDescMode = 'write'">编辑</button><button :class="{ active: featureDescMode === 'preview' }" @click="featureDescPreview">预览</button></div>
+              <textarea v-show="featureDescMode === 'write'" v-model="featureForm.description" class="feature-desc-text" placeholder="需求的背景、范围、验收标准…" />
+              <div v-show="featureDescMode === 'preview'" v-loading="false" class="feature-desc-preview gitea-md rendered-markdown" v-html="featureDescHtml"></div>
+              <div class="feature-form-actions">
+                <el-button v-if="featureEditing" size="small" type="danger" plain @click="removeFeatureEditor">删除</el-button>
+                <span class="flex-sep" />
+                <el-button size="small" @click="featureDrawerVisible = false">取消</el-button>
+                <el-button size="small" type="primary" :loading="featureSaving" @click="saveFeatureForm">保存</el-button>
+              </div>
+            </div>
+          </el-drawer>
+          <el-dialog v-model="releaseDialogVisible" :title="releaseEditing ? '编辑版本' : '新建版本'" width="420px" destroy-on-close>
+            <el-form label-position="top">
+              <el-form-item label="名称"><el-input v-model="releaseForm.name" placeholder="例如 v2.3 / 首发内测" /></el-form-item>
+              <el-form-item label="目标日期"><el-date-picker v-model="releaseForm.targetDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" placeholder="选填" /></el-form-item>
+              <el-form-item label="说明"><el-input v-model="releaseForm.description" type="textarea" :rows="3" placeholder="版本范围、承诺内容（选填）" /></el-form-item>
+            </el-form>
+            <template #footer><el-button @click="releaseDialogVisible = false">取消</el-button><el-button type="primary" :loading="releaseSaving" @click="saveReleaseForm">保存</el-button></template>
           </el-dialog>
           <el-dialog :model-value="Boolean(prototypeViewingBuild)" @update:model-value="(value: boolean | string | number) => { if (!value) prototypeViewingBuild = null }" :title="prototypeViewingBuild ? `构建日志 · ${prototypeViewingBuild.tag}` : ''" width="720px" destroy-on-close @closed="prototypeViewingBuild = null">
             <template v-if="prototypeViewingBuild">
