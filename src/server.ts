@@ -205,6 +205,22 @@ app.get('/auth/me', async (request, reply) => {
   return { user: auth.user }
 })
 
+if (config.nodeEnv === 'development') {
+  app.post<{ Body: { token?: string } }>('/auth/dev-session', async (request, reply) => {
+    const token = String(request.body?.token ?? '').trim()
+    if (!token) return reply.code(400).send({ error: 'token_required' })
+    try {
+      const user = await upsertUser(await getUser(token))
+      await saveGiteaAccessToken(user.id, encryptSecret(token, config.sessionSecret))
+      const sid = crypto.randomBytes(24).toString('hex')
+      sessions.set(sid, { token, user })
+      return reply.setCookie('pm_session', sid, { signed: true, httpOnly: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 8 }).send({ ok: true, user: { login: user.login } })
+    } catch {
+      return reply.code(401).send({ error: 'invalid_gitea_token' })
+    }
+  })
+}
+
 app.post('/auth/logout', async (request, reply) => {
   const sid = sessionId(request)
   if (sid) sessions.delete(sid)
@@ -495,7 +511,7 @@ app.get<{ Params: { id: string } }>('/api/v1/products/:id/overview', async (requ
     query<{ status: string; count: number }>('SELECT status, count(*)::int AS count FROM product_feature WHERE product_id = $1 GROUP BY status', [productId]),
     query<{ stage: string; count: number }>(`SELECT COALESCE(m.stage, '未关联') AS stage, count(*)::int AS count FROM feature_issue fi JOIN product_feature f ON f.id = fi.feature_id LEFT JOIN issue_management m ON m.repository_id = fi.repository_id AND m.issue_number = fi.issue_number WHERE f.product_id = $1 GROUP BY 1`, [productId]),
     query<{ count: number }>('SELECT count(*)::int AS count FROM feature_issue fi JOIN product_feature f ON f.id = fi.feature_id WHERE f.product_id = $1', [productId]),
-    query(`SELECT * FROM product_release WHERE product_id = $1 AND status = 'ongoing' ORDER BY target_date ASC NULLS LAST LIMIT 1`, [productId]),
+    query(`SELECT id, product_id, name, description, status, to_char(target_date, 'YYYY-MM-DD') AS target_date, released_at, created_by, created_at, updated_at FROM product_release WHERE product_id = $1 AND status = 'ongoing' ORDER BY target_date ASC NULLS LAST LIMIT 1`, [productId]),
     query<{ action: string; resource: string; payload: unknown; created_at: string }>('SELECT action, resource, payload, created_at FROM audit_log WHERE resource LIKE $1 ORDER BY id DESC LIMIT 8', [`product/${productId}/%`]),
   ])
   const features: Record<string, number> = { planned: 0, designing: 0, developing: 0, released: 0, deferred: 0 }

@@ -214,13 +214,13 @@ export async function setFeatureIssues(featureId: number, items: Array<{ reposit
   })
 }
 export async function listReleases(productId: number) {
-  return (await query<ProductReleaseRow>('SELECT * FROM product_release WHERE product_id = $1 ORDER BY target_date ASC NULLS LAST, id DESC', [productId])).rows
+  return (await query<ProductReleaseRow>(`SELECT id, product_id, name, description, status, to_char(target_date, 'YYYY-MM-DD') AS target_date, released_at, created_by, created_at, updated_at FROM product_release WHERE product_id = $1 ORDER BY target_date ASC NULLS LAST, id DESC`, [productId])).rows
 }
 export async function getRelease(id: number) {
-  return (await query<ProductReleaseRow>('SELECT * FROM product_release WHERE id = $1', [id])).rows[0] ?? null
+  return (await query<ProductReleaseRow>(`SELECT id, product_id, name, description, status, to_char(target_date, 'YYYY-MM-DD') AS target_date, released_at, created_by, created_at, updated_at FROM product_release WHERE id = $1`, [id])).rows[0] ?? null
 }
 export async function createRelease(input: { productId: number; name: string; description: string; targetDate: string | null; createdBy: number }) {
-  const result = await query<ProductReleaseRow>('INSERT INTO product_release (product_id, name, description, target_date, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING *', [input.productId, input.name, input.description, input.targetDate, input.createdBy])
+  const result = await query<ProductReleaseRow>("INSERT INTO product_release (product_id, name, description, target_date, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id, product_id, name, description, status, to_char(target_date, 'YYYY-MM-DD') AS target_date, released_at, created_by, created_at, updated_at", [input.productId, input.name, input.description, input.targetDate, input.createdBy])
   return result.rows[0]
 }
 export async function updateRelease(id: number, patch: { name?: string; description?: string | null; targetDate?: string | null }) {
@@ -230,10 +230,10 @@ export async function updateRelease(id: number, patch: { name?: string; descript
   if ('description' in patch) { setters.push(`description = $${values.length + 1}`); values.push(patch.description) }
   if ('targetDate' in patch) { setters.push(`target_date = $${values.length + 1}`); values.push(patch.targetDate) }
   if (!setters.length) return getRelease(id)
-  return (await query<ProductReleaseRow>(`UPDATE product_release SET ${setters.join(', ')}, updated_at = now() WHERE id = $1 RETURNING *`, values)).rows[0] ?? null
+  return (await query<ProductReleaseRow>(`UPDATE product_release SET ${setters.join(', ')}, updated_at = now() WHERE id = $1 RETURNING id, product_id, name, description, status, to_char(target_date, 'YYYY-MM-DD') AS target_date, released_at, created_by, created_at, updated_at`, values)).rows[0] ?? null
 }
 export async function setReleaseStatus(id: number, status: string) {
-  return (await query<ProductReleaseRow>(`UPDATE product_release SET status = $2, released_at = CASE WHEN $2 = 'released' THEN COALESCE(released_at, now()) ELSE released_at END, updated_at = now() WHERE id = $1 RETURNING *`, [id, status])).rows[0] ?? null
+  return (await query<ProductReleaseRow>(`UPDATE product_release SET status = $2, released_at = CASE WHEN $2 = 'released' THEN COALESCE(released_at, now()) ELSE released_at END, updated_at = now() WHERE id = $1 RETURNING id, product_id, name, description, status, to_char(target_date, 'YYYY-MM-DD') AS target_date, released_at, created_by, created_at, updated_at`, [id, status])).rows[0] ?? null
 }
 export async function deleteRelease(id: number) {
   await query('DELETE FROM product_release WHERE id = $1', [id])

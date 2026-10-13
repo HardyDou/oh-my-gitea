@@ -639,7 +639,7 @@ function formatIssueState(state: string) {
 }
 function tomorrowDays(targetDate: string | null) {
   if (!targetDate) return null
-  const target = new Date(`${targetDate}T23:59:59`)
+  const target = new Date(`${targetDate.slice(0, 10)}T23:59:59`)
   const diff = Math.ceil((target.getTime() - Date.now()) / 86400000)
   return diff
 }
@@ -978,7 +978,7 @@ onMounted(initializePage)
                           <h3>下一版本</h3>
                           <template v-if="productOverview?.nextRelease">
                             <div class="ov-release-name"><strong>{{ productOverview.nextRelease.name }}</strong><i class="release-pill" :style="{ color: releaseStatusColor(productOverview.nextRelease.status), background: `${releaseStatusColor(productOverview.nextRelease.status)}1c` }">{{ releaseStatusText(productOverview.nextRelease.status) }}</i></div>
-                            <div class="muted">目标 {{ productOverview.nextRelease.target_date ?? '未设置' }}</div>
+                            <div class="muted">目标 {{ productOverview.nextRelease.target_date?.slice(0, 10) ?? '未设置' }}</div>
                             <div v-if="tomorrowDays(productOverview.nextRelease.target_date) !== null" class="ov-countdown" :class="{ overdue: (tomorrowDays(productOverview.nextRelease.target_date) ?? 0) < 0 }">{{ (tomorrowDays(productOverview.nextRelease.target_date) ?? 0) < 0 ? `已过期 ${Math.abs(tomorrowDays(productOverview.nextRelease.target_date) ?? 0)} 天` : `还有 ${tomorrowDays(productOverview.nextRelease.target_date)} 天` }}</div>
                           </template>
                           <span v-else class="muted">暂无进行中的版本</span>
@@ -1114,6 +1114,9 @@ onMounted(initializePage)
             </el-form>
             <template #footer><el-button @click="batchDialogVisible = false">取消</el-button><el-button type="primary" :loading="batchSaving" @click="saveBatchManagement">确认修改</el-button></template>
           </el-dialog>
+
+          </div>
+          </template>
           <el-drawer v-model="featureDrawerVisible" :title="featureEditing ? `編輯功能项` : '新建功能项'" size="460px" destroy-on-close :before-close="beforeFeatureDrawerClosed">
             <div class="feature-form">
               <label>标题</label><el-input v-model="featureForm.title" placeholder="一句话说明这个功能" />
@@ -1167,8 +1170,6 @@ onMounted(initializePage)
               <el-table-column label="操作" width="90"><template #default="scope"><el-button link type="danger" @click="revokeUserApiToken(scope.row)">撤销</el-button></template></el-table-column>
             </el-table>
           </el-dialog>
-          </div>
-          </template>
         </template>
       </main>
     </el-container>
