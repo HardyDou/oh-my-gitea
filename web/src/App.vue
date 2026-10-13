@@ -114,8 +114,7 @@ const productPrototypes = ref<Prototype[]>([])
 const prototypeRepoInput = ref('')
 const buildTagDrafts = ref<Record<number, string>>({})
 const buildStarting = ref(false)
-const productSearchTerm = ref('')
-const productFiltered = computed(() => { const term = productSearchTerm.value.trim(); if (!term) return products.value; return products.value.filter((product) => product.name.includes(term) || (product.description ?? '').includes(term)) })
+const productFiltered = computed(() => products.value)
 const docDirty = computed(() => { if (!currentDoc.value) return false; if (!currentDoc.value.id) return Boolean(docDraft.value.title.trim() || docDraft.value.content); return docDraft.value.title !== currentDoc.value.title || docDraft.value.content !== currentDoc.value.content })
 const prototypeViewingBuild = ref<PrototypeBuild | null>(null)
 let buildPollTimer: ReturnType<typeof setInterval> | null = null
@@ -754,11 +753,10 @@ onMounted(initializePage)
           <template v-else-if="activeView === 'products'">
             <section v-loading="productLoading" class="products-page">
               <template v-if="!selectedProduct">
-                <div class="page-heading"><div><h1>产品管理</h1><p>登记产品基础信息、维护产品文档和原型版本。</p></div><el-button type="primary" @click="openProductDialog(null)"><el-icon><Plus /></el-icon>新建产品</el-button></div>
-                <div class="product-toolbar"><el-input v-model="productSearchTerm" class="product-search" placeholder="搜索产品名称或描述" clearable /></div>
+                <div class="page-heading"><div><h1>产品</h1></div><el-button type="primary" @click="openProductDialog(null)"><el-icon><Plus /></el-icon>新建产品</el-button></div>
                 <div class="product-grid"><button v-for="product in productFiltered" :key="product.id" class="product-card" @click="selectProduct(product)"><span class="product-mark" :style="productMarkStyle(product)">{{ product.name.slice(0, 1) }}</span><strong>{{ product.name }}</strong><span class="product-card-desc">{{ product.description || '暂无描述' }}</span><small>更新于 {{ formatDate(product.updated_at) }}</small></button></div>
                 <el-empty v-if="!productLoading && products.length === 0" description="暂无产品，先新建一个" />
-                <div v-else-if="!productLoading && productFiltered.length === 0" class="muted" style="padding: 30px 0; text-align: center;">没有匹配的产品，换个关键词试试。</div>
+                <div v-else-if="!productLoading && productFiltered.length === 0" class="muted" style="padding: 30px 0; text-align: center;">暂无产品</div>
               </template>
               <template v-else>
                 <div class="products-crumb"><button class="crumb-link" @click="selectProduct(null)">产品管理</button><span>/</span><strong>{{ selectedProduct.name }}</strong></div>
