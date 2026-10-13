@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import GiteaSettings from './GiteaSettings.vue'
 import { ArrowLeft, Bell, Box, Calendar, Connection, Grid, House, Monitor, Moon, Setting, Sunny, User, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type TagProps } from 'element-plus'
-import { addIssueComment, batchUpdateManagement, getFeatureDetail, searchAll, createApiAccessToken, createBuild, createDoc, createFeature, createProduct, createPrototype, createRelease, deleteDoc, deleteFeature, deleteProduct, deletePrototype, deleteRelease, getApiAccessTokens, getBuild, getDocDetail, getDocs, getProduct, getIssueDetail, getIssues, getMe, getProductOverview, getProducts, getPrototypes, getRepositories, getReleases, getStageConfig, renderMarkdown, revokeApiAccessToken, saveStageConfig, searchIssues, setReleaseStatus, updateAssignee, updateDoc, updateFeature, updateIssueDueDate, updateManagement, updateProduct, updateRelease, uploadIssueAttachment, type ApiAccessToken, type AppUser, type FeatureStatus, type FeaturePayload, type GiteaComment, type GiteaIssue, type GiteaRepository, type LinkedFeatureIssue, type Product, type ProductDoc, type ProductDocSummary, type ProductFeature, type ProductOverview, type ProductRelease, type Prototype, type ReleaseStatus, type StageConfig } from './api'
+import { addIssueComment, batchUpdateManagement, getFeatureDetail, searchAll, createApiAccessToken, createBuild, createDoc, createFeature, createProduct, createPrototype, createRelease, deleteDoc, deleteFeature, deleteProduct, deletePrototype, deleteRelease, getApiAccessTokens, getBuild, getDocDetail, getDocs, getProduct, getProductBrief, getIssueDetail, getIssues, getMe, getProductOverview, getProducts, getPrototypes, getRepositories, getReleases, getStageConfig, renderMarkdown, revokeApiAccessToken, saveStageConfig, searchIssues, setReleaseStatus, updateAssignee, updateDoc, updateFeature, updateIssueDueDate, updateManagement, updateProduct, updateRelease, uploadIssueAttachment, type ApiAccessToken, type AppUser, type FeatureStatus, type FeaturePayload, type GiteaComment, type GiteaIssue, type GiteaRepository, type LinkedFeatureIssue, type Product, type ProductDoc, type ProductDocSummary, type ProductFeature, type ProductOverview, type ProductRelease, type Prototype, type ReleaseStatus, type StageConfig } from './api'
 
 type Stage = string
 type Theme = 'light' | 'dark' | 'auto'
@@ -111,6 +111,25 @@ const docSaving = ref(false)
 const docHtml = ref('')
 const docPreviewLoading = ref(false)
 const docMode = ref<'write' | 'preview'>('write')
+const docOutline = computed(() => {
+  const rows: Array<{ level: number; text: string }> = []
+  for (const line of docDraft.value.content.split('\n')) {
+    const match = /^(#{1,3}) (.+)$/.exec(line)
+    if (!match) continue
+    rows.push({ level: match[1].length, text: (match[2] || '').trim() })
+  }
+  return rows
+})
+function injectDocHeadingIds(html: string) {
+  let i = 0
+  return html.replace(/<h([1-3])([^>]*)>([\s\S]*?)<\/h\1>/gi, (match, level: string, attrs: string, inner: string) => {
+    const id = `doc-h-${i++}`
+    return `<h${level}${attrs} id="${id}">${inner}</h${level}>`
+  })
+}
+function scrollToDocHeading(index: number) {
+  document.querySelector(`.doc-markdown-preview h[id="doc-h-${index}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 const productPrototypes = ref<Prototype[]>([])
 const prototypeRepoInput = ref('')
 const buildTagDrafts = ref<Record<number, string>>({})
@@ -548,7 +567,7 @@ async function switchDocMode(mode: 'write' | 'preview') {
   if (mode === docMode.value) return
   if (mode === 'preview') {
     docPreviewLoading.value = true
-    try { docHtml.value = (await renderMarkdown(docDraft.value.content)).html } catch (error) { ElMessage.error((error as Error).message || '预览失败'); return } finally { docPreviewLoading.value = false }
+    try { docHtml.value = injectDocHeadingIds((await renderMarkdown(docDraft.value.content)).html) } catch (error) { ElMessage.error((error as Error).message || '预览失败'); return } finally { docPreviewLoading.value = false }
   }
   docMode.value = mode
 }
@@ -609,6 +628,31 @@ const productFeatures = ref<ProductFeature[]>([])
 const productReleases = ref<ProductRelease[]>([])
 const productOverview = ref<ProductOverview | null>(null)
 const featureStatusFilter = ref('全部')
+const featureSortKey = ref<'' | 'title' | 'priority' | 'updated_at'>('')
+const featureSortDir = ref<1 | -1>(-1)
+const featureSorted = computed(() => {
+  const list = productFeatureFiltered.value
+  if (!featureSortKey.value) return list
+  const key = featureSortKey.value as 'title' | 'priority' | 'updated_at'
+  const dir: number = featureSortDir.value
+  const order = ['P0', 'P1', 'P2', 'P3']
+  return [...list].sort((a, b) => {
+    let va: string | number = a[key]
+    let vb: string | number = b[key]
+    if (key === 'priority') { va = order.indexOf(a.priority) + 1; vb = order.indexOf(b.priority) + 1 }
+    va = va ?? ''
+    vb = vb ?? ''
+    return String(va).localeCompare(String(vb)) * dir
+  })
+})
+function handleFeatureSortEvent(changeEvent: { prop?: string; order?: string }) {
+  if (!changeEvent?.prop) return
+  handleFeatureSortChange(changeEvent.prop)
+}
+function handleFeatureSortChange(prop: string) {
+  if (featureSortKey.value === prop) featureSortDir.value = featureSortDir.value === 1 ? -1 : 1
+  else { featureSortKey.value = prop as 'title' | 'priority' | 'updated_at'; featureSortDir.value = 1 }
+}
 const featureReleaseFilter = ref('全部')
 const productFeatureFiltered = computed(() => productFeatures.value.filter((feature) => (featureStatusFilter.value === '全部' || feature.status === featureStatusFilter.value) && (featureReleaseFilter.value === '全部' || (featureReleaseFilter.value === '未排期' ? !feature.release_id : String(feature.release_id) === featureReleaseFilter.value))))
 const featureStatusCounts = computed(() => { const counts: Record<string, number> = { 全部: productFeatures.value.length }; for (const [status] of Object.entries(featureStatusMap)) counts[status] = productFeatures.value.filter((feature) => feature.status === status).length; return counts })
@@ -850,6 +894,25 @@ async function refreshBuilds() {
   const hasActiveBuild = productPrototypes.value.some((prototype) => prototype.builds.some((build) => build.status === 'pending' || build.status === 'building'))
   if (!hasActiveBuild) stopBuildPolling()
 }
+async function copyProductBrief() {
+  if (!selectedProduct.value) return
+  try {
+    const result = await getProductBrief(selectedProduct.value.id)
+    await copyText(result.markdown)
+    ElMessage.success('产品上下文已复制为 Markdown，可直接粘贴给 AI')
+  } catch (error) { ElMessage.error((error as Error).message || '复制失败') }
+}
+async function copyText(text: string) {
+  try { await navigator.clipboard.writeText(text); return } catch { /* ↑ 浏览器限制时降级 */ }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
 async function refreshProductOverview() {
   if (!selectedProduct.value) return
   try { productOverview.value = await getProductOverview(selectedProduct.value.id) } catch { /* 忽略概览刷新错误 */ }
@@ -1059,14 +1122,14 @@ onMounted(initializePage)
                     </template>
                     <template v-else-if="productTab === 'features'">
                       <div class="feature-health-row"><button class="status-health" :class="{ active: featureStatusFilter === '全部' }" @click="featureStatusFilter = '全部'"><i class="status-dot all-dot" />全部<span class="status-count">{{ featureStatusCounts['全部'] }}</span></button><button v-for="(meta, status) in featureStatusMap" :key="status" class="status-health" :class="{ active: featureStatusFilter === status }" @click="featureStatusFilter = featureStatusFilter === status ? '全部' : status"><i class="status-dot" :style="{ background: meta.color }" />{{ meta.text }}<span class="status-count">{{ featureStatusCounts[status] }}</span></button><span class="flex-sep" /><el-select v-model="featureReleaseFilter" class="feature-filter" size="small"><el-option value="全部" label="全部版本" /><el-option v-for="release in productReleases" :key="release.id" :value="String(release.id)" :label="release.name" /><el-option value="未排期" label="未排期" /></el-select><el-button size="small" type="primary" plain @click="openFeatureDrawer(null)">＋新建功能项</el-button></div>
-                      <el-table :data="productFeatureFiltered" class="feature-table" size="small" @row-click="(row: ProductFeature) => openFeatureDrawer(row)">
+                      <el-table :data="featureSorted" class="feature-table" size="small" @sort-change="handleFeatureSortEvent" @row-click="(row: ProductFeature) => openFeatureDrawer(row)">
                         <template #empty><div class="feature-empty">还没有功能项，点击右上角「＋新建功能项」创建第一条。</div></template>
                         <el-table-column label="状态" width="120"><template #default="scope"><el-popover placement="bottom" :width="150" trigger="click"><template #reference><button class="status-pill" :style="{ color: featureStatusColor(scope.row.status), background: `${featureStatusColor(scope.row.status)}1c` }" @click.stop><i class="status-dot" :style="{ background: featureStatusColor(scope.row.status) }" />{{ featureStatusText(scope.row.status) }}</button></template><button v-for="(meta, status) in featureStatusMap" :key="status" class="popup-option" :class="{ selected: status === scope.row.status }" @click.stop="quickFeatureUpdate(scope.row, { status: status as FeatureStatus })">{{ meta.text }}</button></el-popover></template></el-table-column>
-                        <el-table-column label="标题" min-width="240"><template #default="scope"><span class="feature-title-cell">{{ scope.row.title }}</span><a v-for="issue in scope.row.issues.slice(0, 3)" :key="`${issue.owner}/${issue.name}/${issue.number}`" class="feature-issue-chip" :href="issue.html_url ?? `${prototypeBase}/prototypes/self-${scope.row.id}`" target="_blank" rel="noreferrer" @click.stop :class="{ closed: issue.state === 'closed' }">#{{ issue.number }}</a><span v-if="scope.row.issues.length > 3" class="feature-link-count">+{{ scope.row.issues.length - 3 }}</span></template></el-table-column>
-                        <el-table-column label="优先级" width="90"><template #default="scope"><el-popover placement="bottom" :width="100" trigger="click"><template #reference><button class="feature-priority" :style="{ color: featurePriorityColorMap[scope.row.priority] }" @click.stop>{{ scope.row.priority }}</button></template><button v-for="priority in ['P0', 'P1', 'P2', 'P3']" :key="priority" class="popup-option" :class="{ selected: priority === scope.row.priority }" @click.stop="quickFeatureUpdate(scope.row, { priority })">{{ priority }}</button></el-popover></template></el-table-column>
+                        <el-table-column label="标题" min-width="240" sortable="custom" prop="title"><template #default="scope"><span class="feature-title-cell">{{ scope.row.title }}</span><a v-for="issue in scope.row.issues.slice(0, 3)" :key="`${issue.owner}/${issue.name}/${issue.number}`" class="feature-issue-chip" :href="issue.html_url ?? `${prototypeBase}/prototypes/self-${scope.row.id}`" target="_blank" rel="noreferrer" @click.stop :class="{ closed: issue.state === 'closed' }">#{{ issue.number }}</a><span v-if="scope.row.issues.length > 3" class="feature-link-count">+{{ scope.row.issues.length - 3 }}</span></template></el-table-column>
+                        <el-table-column label="优先级" width="90" sortable="custom" prop="priority"><template #default="scope"><el-popover placement="bottom" :width="100" trigger="click"><template #reference><button class="feature-priority" :style="{ color: featurePriorityColorMap[scope.row.priority] }" @click.stop>{{ scope.row.priority }}</button></template><button v-for="priority in ['P0', 'P1', 'P2', 'P3']" :key="priority" class="popup-option" :class="{ selected: priority === scope.row.priority }" @click.stop="quickFeatureUpdate(scope.row, { priority })">{{ priority }}</button></el-popover></template></el-table-column>
                         <el-table-column label="负责人" width="100"><template #default="scope"><span>{{ scope.row.assignee || '—' }}</span></template></el-table-column>
                         <el-table-column label="版本" width="120"><template #default="scope"><span>{{ featureReleaseName(scope.row.release_id) }}</span></template></el-table-column>
-                        <el-table-column label="更新时间" width="130"><template #default="scope"><span class="muted">{{ formatDate(scope.row.updated_at) }}</span></template></el-table-column>
+                        <el-table-column label="更新时间" width="130" sortable="custom" prop="updated_at"><template #default="scope"><span class="muted">{{ formatDate(scope.row.updated_at) }}</span></template></el-table-column>
                       </el-table>
                     </template>
                     <template v-else-if="productTab === 'releases'">
@@ -1098,9 +1161,13 @@ onMounted(initializePage)
                       <section v-else class="doc-editor panel-box">
                         <div class="doc-editor-head"><el-button text @click="closeDoc">← 返回文档列表</el-button><el-input v-model="docDraft.title" placeholder="文档标题" class="doc-title-input" /><span v-if="docDirty" class="dirty-hint">● 未保存</span><el-button type="primary" :disabled="!docDirty" :loading="docSaving" @click="saveCurrentDoc">保存</el-button><el-button type="danger" plain @click="removeDoc(currentDoc)">删除</el-button></div>
                         <div class="doc-mode-tabs"><button :class="{ active: docMode === 'write' }" @click="switchDocMode('write')">编辑</button><button :class="{ active: docMode === 'preview' }" @click="switchDocMode('preview')">预览</button></div>
-                        <div v-loading="docPreviewLoading" class="doc-mode-body">
+                        <div v-loading="docPreviewLoading" class="doc-mode-body" :class="{ 'with-outline': docMode === 'preview' && docOutline.length > 0 }">
                           <textarea v-show="docMode === 'write'" v-model="docDraft.content" class="doc-markdown-text" placeholder="使用 Markdown 编写产品文档…" />
                           <div v-show="docMode === 'preview'" class="doc-markdown-preview gitea-md rendered-markdown" v-html="docHtml"></div>
+                          <aside v-show="docMode === 'preview' && docOutline.length > 0" class="doc-outline">
+                            <strong>大纲</strong>
+                            <button v-for="(item, index) in docOutline" :key="`${index}-${item.text}`" class="doc-outline-item" :style="{ paddingLeft: `${(item.level - 1) * 14 + 8}px` }" @click="scrollToDocHeading(index)">{{ item.text }}</button>
+                          </aside>
                         </div>
                       </section>
                     </template>
@@ -1124,7 +1191,7 @@ onMounted(initializePage)
                       <div class="side-row"><span>描述</span><b>{{ selectedProduct.description || '暂无' }}</b></div>
                       <div class="side-row"><span>创建时间</span><b>{{ formatDate(selectedProduct.created_at) }}</b></div>
                       <div class="side-row"><span>更新时间</span><b>{{ formatDate(selectedProduct.updated_at) }}</b></div>
-                      <div class="side-actions"><el-button size="small" plain @click="openProductDialog(selectedProduct)">编辑</el-button><el-button size="small" type="danger" plain @click="removeProduct(selectedProduct)">删除</el-button></div>
+                      <div class="side-actions"><el-button size="small" plain @click="copyProductBrief">复制给 AI</el-button><el-button size="small" plain @click="openProductDialog(selectedProduct)">编辑</el-button><el-button size="small" type="danger" plain @click="removeProduct(selectedProduct)">删除</el-button></div>
                     </div>
                     <div class="panel-box">
                       <h3>概览</h3>

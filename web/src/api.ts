@@ -206,6 +206,9 @@ export function setReleaseStatus(id: number, status: ReleaseStatus) {
 export function deleteRelease(id: number) {
   return request<{ ok: boolean }>(`/api/v1/releases/${id}`, { method: 'DELETE' })
 }
+export function getProductBrief(productId: number) {
+  return request<{ markdown: string }>(`/api/v1/products/${productId}/brief`)
+}
 export function getProductOverview(productId: number) {
   return request<ProductOverview>(`/api/v1/products/${productId}/overview`)
 }

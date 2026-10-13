@@ -517,6 +517,41 @@ app.get('/api/v1/products', async (request, reply) => {
 })
 
 // 保留无统计的原始列表路由（增加段后出现，保持行为一致）
+app.get<{ Params: { id: string } }>('/api/v1/products/:id/brief', async (request, reply) => {
+  const auth = await authenticate(request, reply)
+  if (!auth) return
+  const productId = Number(request.params.id)
+  const productRow = (await query<{ id: number; name: string; description: string | null }>('SELECT id, name, description FROM product WHERE id = $1', [productId])).rows[0]
+  if (!productRow) return reply.code(404).send({ error: 'product_not_found', message: '产品不存在' })
+  const [releases, features] = await Promise.all([listReleases(productId), listFeatures(productId)])
+  const featureStatusMap: Record<string, string> = { planned: '规划中', designing: '设计中', developing: '研发中', released: '已发布', deferred: '暂缓' }
+  const releaseStatusTextMap: Record<string, string> = { pending: '未开始', ongoing: '进行中', released: '已发布', archived: '归档' }
+  const lines: string[] = []
+  lines.push(`# ${productRow.name} 产品上下文`)
+  lines.push('')
+  lines.push('## 背景')
+  lines.push(productRow.description || '（暂无描述）')
+  lines.push('')
+  lines.push('## 版本计划')
+  for (const release of releases) {
+    lines.push(`- ${release.id}/${release.name}（${releaseStatusTextMap[release.status] ?? release.status} · 目标 ${release.target_date ?? '未排期'}）`)
+  }
+  lines.push('')
+  lines.push('## 功能项')
+  for (const feature of features) {
+    const releaseName = releases.find((item) => item.id === feature.release_id)?.name ?? '未排期'
+    lines.push(`- ${feature.id}/${feature.title}（${featureStatusMap[feature.status] ?? feature.status} · ${feature.priority} · 负责人 ${feature.assignee ?? '-'} · 版本 ${releaseName}）`)
+    for (const issue of feature.issues) {
+      lines.push(`  - Gitea Issue: ${issue.owner}/${issue.name}#${issue.number}（${issue.state === 'closed' ? '已关闭' : '开放'}）${issue.title}`)
+    }
+  }
+  lines.push('')
+  lines.push('## 操作提示')
+  lines.push('- 使用 omg CLI 修改：`omg feature update FEATURE_ID --status developing` / `omg management OWNER REPO NUMBER STAGE_CODE SUBSTAGE_CODE`')
+  lines.push('- 阶段/子阶段/优先级写入 oh-my-gitea；Issue 状态评论写回 Gitea。')
+  return { markdown: lines.join('\n') }
+})
+
 app.get<{ Params: { id: string } }>('/api/v1/products/:id/overview', async (request, reply) => {
   const auth = await authenticate(request, reply); if (!auth) return
   const productId = Number(request.params.id)
